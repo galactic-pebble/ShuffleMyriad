@@ -1,4 +1,4 @@
-# Card Game Simulator - ShuffleMyriad -
+# Card Game Simulator - Shuffle Myriad -
 
 カードゲーム用のデジタルプレイマットシミュレーターです。デッキを読み込んでカードを配置・操作し、Discordなどの画面共有機能を使って対戦相手とプレイできます。
 
@@ -20,8 +20,8 @@
 
 ### 1. リポジトリのクローン
 ```bash
-git clone https://github.com/yourusername/ShuffleMyriad_Simulator.git
-cd ShuffleMyriad_Simulator
+git clone https://github.com/galactic-pebble/ShuffleMyriad.git
+cd ShuffleMyriad
 ```
 
 ### 2. 必要なライブラリのインストール
