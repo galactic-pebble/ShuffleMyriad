@@ -57,7 +57,7 @@ ShuffleMyriad_Simulator/
 ### 1. カード画像の準備
 - `card-img/` フォルダにカード画像を配置
 - ファイル名は `{カードID}.png` 形式
-- 推奨サイズ: 78×111px（自動リサイズされます）
+- 推奨サイズ: 390×555px（自動リサイズされます）
 
 ### 2. カードリストファイル（CardList.txt）
 ```
@@ -82,8 +82,8 @@ playmat.png
 
 ### 4. リソース画像の準備
 - `resource/playmat.png`: プレイマット背景（960×720px推奨）
-- `resource/reverse.png`: カード裏面（78×111px推奨）
-- `resource/noimage.png`: 画像なしカード用
+- `resource/reverse.png`: カード裏面（390×555px推奨）
+- `resource/noimage.png`: 画像なしカード用（390×555px推奨）
 - `resource/unknown.png`: 非公開カード用（390×555px推奨）
 
 ## 使用方法
