@@ -29,7 +29,7 @@ cd ShuffleMyriad
 
 ### 2. 必要なライブラリのインストール
 ```bash
-pip install tkinter pillow
+pip install -r requirements.txt
 ```
 
 ### 3. 実行
