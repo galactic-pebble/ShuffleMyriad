@@ -34,7 +34,6 @@ ShuffleMyriad_Simulator は、ローカル環境で動作するカードゲー�
     * 選択したカードの詳細情報表示ウィンドウ
     * 対戦者用の盤面ミラー表示ウィンドウ (上下左右反転)
 * **その他:**
-    * 「100連ガチャ」機能によるデッキファイル生成 (`deck` フォルダ、`CardList.csv` を参照)
     * アプリケーションの再起動
 
 ## 動作環境
@@ -50,7 +49,8 @@ ShuffleMyriad_Simulator は、ローカル環境で動作するカードゲー�
 
 ```
 ShuffleMyriad_Simulator/
-├── ShuffleMyriad_Simulator.py  (メインスクリプト)
+├── ShuffleMyriad_Simulator.py  (シミュレータースクリプト)
+├── ShuffleMyriad_DeckEditor.py (デッキ編集スクリプト)
 ├── CardList.csv                (カード情報リスト - スクリプト直下)
 ├── config.cfg                  (設定ファイル - オプション)
 │
@@ -109,10 +109,16 @@ ShuffleMyriad_Simulator/
     pip install -r requirements.txt
     ```
 
-3.  **アプリケーションの実行:**
+3.  **シミュレーターの実行:**
     ターミナルまたはコマンドプロンプトで、`ShuffleMyriad_Simulator.py` があるディレクトリに移動し、以下のコマンドを実行します。
     ```bash
     python ShuffleMyriad_Simulator.py
+    ```
+
+4.  **デッキ編集スクリプトの実行:**
+    ターミナルまたはコマンドプロンプトで、`ShuffleMyriad_DeckEditor.py` があるディレクトリに移動し、以下のコマンドを実行します。
+    ```bash
+    python ShuffleMyriad_DeckEditor.py
     ```
 
 ## 基本的な使い方
@@ -144,7 +150,8 @@ ShuffleMyriad_Simulator/
 
 ### デッキファイル (`.txt`)
 
-テキストファイル形式で、1行に1つのカードIDを記述します。
+デッキ編集スクリプトでデッキを作成できます。
+デッキはテキストファイル形式で、1行に1つのカードIDを記述します。
 
 ```
 card_id_001
@@ -186,7 +193,7 @@ card004,ドラゴン,1
 * **EX値:**
     * `0`: 通常のカード
     * `1`: EXデッキに入るカード (「100連ガチャ」機能でEXデッキ候補として扱われます)
-    * `2`以上: 「100連ガチャ」機能でメインデッキには含まれなくなるカード (主にガチャ対象外の特殊カードなどに使用)
+    * `2`以上: デッキ編集スクリプトの「100連ガチャ」機能でメインデッキには含まれなくなるカード (主にガチャ対象外の特殊カードなどに使用)
 
 ## ライセンス
 
