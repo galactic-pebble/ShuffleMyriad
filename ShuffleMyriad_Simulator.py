@@ -1,7 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
-from tkinter import filedialog
-from tkinter import simpledialog
+from tkinter import messagebox, filedialog, simpledialog
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 import os
 import random
@@ -9,16 +7,12 @@ import sys
 from datetime import datetime
 import time
 
-def load_config(config_file="config.txt"):
-    """
-    Load refresh rate from the config file.
-    If the file or the value is invalid, return a default value.
-    """
-    default_opponent_refresh_rate = 120  # Default refresh rate
+# --- Helper Functions (can be outside classes or static methods) ---
+def load_config(config_file="config.cfg"):
+    default_opponent_refresh_rate = 120
     if not os.path.exists(config_file):
-        print(f"{config_file} not found. Using default refresh rate: {default_refresh_rate}")
+        print(f"{config_file} not found. Using default refresh rate: {default_opponent_refresh_rate}")
         return default_opponent_refresh_rate
-
     try:
         with open(config_file, "r") as f:
             for line in f:
@@ -26,1341 +20,1438 @@ def load_config(config_file="config.txt"):
                     _, value = line.strip().split("=")
                     return int(value)
     except Exception as e:
-        print(f"Error reading {config_file}: {e}. Using default refresh rate: {default_refresh_rate}")
+        print(f"Error reading {config_file}: {e}. Using default refresh rate: {default_opponent_refresh_rate}")
     return default_opponent_refresh_rate
 
-opponent_refresh_rate = load_config()
+def center_tk_window(parent_root, window, width, height):
+    """Centers a Tkinter window relative to its parent or screen."""
+    window.update_idletasks() # Ensure window dimensions are up-to-date
+    if parent_root and parent_root.winfo_viewable():
+        parent_x = parent_root.winfo_x()
+        parent_y = parent_root.winfo_y()
+        parent_width = parent_root.winfo_width()
+        parent_height = parent_root.winfo_height()
+        x = parent_x + (parent_width // 2) - (width // 2)
+        y = parent_y + (parent_height // 2) - (height // 2)
+    else: # Fallback to screen centering if parent is not available/viewable
+        screen_width = window.winfo_screenwidth()
+        screen_height = window.winfo_screenheight()
+        x = (screen_width // 2) - (width // 2)
+        y = (screen_height // 2) - (height // 2)
+    window.geometry(f"{width}x{height}+{x}+{y}")
 
-# メインウィンドウをディスプレイの中央に配置
-def center_main_window(root, width, height):
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    x = (screen_width // 2) - (width // 2)
-    y = (screen_height // 2) - (height // 2)
-    root.geometry(f"{width}x{height}+{x}+{y}")
-
-# メインウィンドウの設定
-root = tk.Tk()
-root.title("ShuffleMyriad_Simulator")
-root.geometry("960x860")
-center_main_window(root, 960, 860)
-# サイズ変更を無効化
-root.resizable(False, False)
-
-# キャンバスの作成
-canvas = tk.Canvas(root, width=960, height=720, bg="white")
-canvas.pack()
-
-# ゲーム状態を保持する変数
-# デッキ
-deck = []
-# ボード上のカード
-on_board = []
-# ボード上のマーカー（カードの一種として扱う）
-markers = []
-# 選択中のカード（通常カードまたはマーカー）
-selected_card = None
-# ドラッグ状態フラグ
-is_dragging = False
-
-playmat_path = os.path.join("resource", "playmat.png")
-playmat_image = Image.open(playmat_path).resize((960, 720))
-playmat_photo = ImageTk.PhotoImage(playmat_image)  # プレイマット画像の参照を保持
-
-opponent_window = None  # 対戦者用ウインドウの参照を保持する変数
-edit_window = None  # 編集ウインドウの参照を保持
-deck_window = None  # デッキ内容表示ウィンドウの参照を保持
-
-last_displayed_image = None  # 最後に表示されたカード画像を保持する変数
-
-# リバースボタンの参照
-reverse_button = None
-bring_to_front_button = None
-send_to_back_button = None
-
-# カード裏面の画像の設定
-reverse_image_path = os.path.join("resource", "reverse.png")
-reverse_image = Image.open(reverse_image_path).resize((78, 111)) if os.path.exists(reverse_image_path) else None
-reverse_photo_image = ImageTk.PhotoImage(reverse_image) if reverse_image else None
-reverse_rotated_image = reverse_image.rotate(90, expand=True).resize((111, 78)) if reverse_image else None
-reverse_rotated_photo_image = ImageTk.PhotoImage(reverse_rotated_image) if reverse_rotated_image else None
-
-noimage_path = os.path.join("resource", "noimage.png")
-noimage_image = Image.open(noimage_path).resize((78, 111)) if os.path.exists(noimage_path) else None
-noimage_photo_image = ImageTk.PhotoImage(noimage_image) if noimage_image else None
-noimage_large_image = noimage_image.resize((390, 555)) if noimage_image else None
-noimage_large_photo_image = ImageTk.PhotoImage(noimage_large_image) if noimage_large_image else None
-
-unknown_image_path = os.path.join("resource", "unknown.png")
-unknown_image = Image.open(unknown_image_path).resize((390, 555)) if os.path.exists(unknown_image_path) else None
-unknown_photo_image = ImageTk.PhotoImage(unknown_image) if unknown_image else None
-
-# デッキ枚数表示ラベルの初期化（グローバル変数として宣言）
-deck_count_label = None
-info_window = None  # カード情報ウィンドウの参照
-
-# デッキをロードする関数
-def load_deck():
-    global deck, ex_deck, reverse_image_path, reverse_image, reverse_photo_image, reverse_rotated_image, reverse_rotated_photo_image, playmat_path, playmat_image, playmat_photo
-    ex_deck = []  # EXデッキを明示的に初期化
-
-    # 実行ファイルと同じディレクトリを初期ディレクトリに設定
-    initial_dir = os.path.dirname(sys.argv[0]) if getattr(sys, 'frozen', False) else os.getcwd()
-
-    file_path = filedialog.askopenfilename(
-        title="デッキデータを選択",
-        filetypes=[("テキストファイル", "*.txt"), ("すべてのファイル", "*.*")],
-        initialdir=initial_dir  # 初期ディレクトリを指定
-    )
-    if not file_path:
-        return
-    try:
-        with open(file_path, "r", encoding="utf-8") as file:
-            lines = [line.strip() for line in file if line.strip()]
-
-            # リソースセクションの解析
-            resource_section = None
-            if "[Resource]" in lines:
-                resource_index = lines.index("[Resource]")
-                resource_section = lines[resource_index + 1:]
-                lines = lines[:resource_index]  # リソースセクションを削除
-
-            # カード裏面画像とプレイマット画像を設定
-            if resource_section and len(resource_section) >= 2:
-                reverse_image_path = os.path.join("resource", resource_section[0])
-                playmat_path = os.path.join("resource", resource_section[1])
-            else:
-                reverse_image_path = os.path.join("resource", "reverse.png")
-                playmat_path = os.path.join("resource", "playmat.png")
-
-            if os.path.exists(reverse_image_path):
-                reverse_image = Image.open(reverse_image_path).resize((78, 111))
-                reverse_photo_image = ImageTk.PhotoImage(reverse_image)
-                reverse_rotated_image = reverse_image.rotate(90, expand=True).resize((111, 78))
-                reverse_rotated_photo_image = ImageTk.PhotoImage(reverse_rotated_image)
-            else:
-                reverse_image = None
-                reverse_photo_image = None
-                reverse_rotated_image = None
-                reverse_rotated_photo_image = None
-
-            if os.path.exists(playmat_path):
-                playmat_image = Image.open(playmat_path).resize((960, 720))
-                playmat_photo = ImageTk.PhotoImage(playmat_image)
-
-            # [EX]以降をEXデッキとして扱う
-            if "[EX]" in lines:
-                ex_index = lines.index("[EX]")
-                ex_deck = [
-                    {"id": card_id, "width": 78, "height": 111, "rotated": False, "face_up": True, "revealed": True, "image": None, "original_image": None}
-                    for card_id in lines[ex_index + 1:]
-                ]
-                deck = [
-                    {"id": card_id, "width": 78, "height": 111, "rotated": False, "face_up": True, "revealed": True, "image": None, "original_image": None}
-                    for card_id in lines[:ex_index]
-                ]
-            else:
-                deck = [
-                    {"id": card_id, "width": 78, "height": 111, "rotated": False, "face_up": True, "revealed": True, "image": None, "original_image": None}
-                    for card_id in lines
-                ]
-
-        # 各カードの画像をロード
-        for card in deck + ex_deck:
-            image_path = os.path.join("card-img", f"{card['id']}.png")
-            if os.path.exists(image_path):
-                card_image = Image.open(image_path).resize((78, 111))
-                card["original_image"] = card_image
-                card["image"] = ImageTk.PhotoImage(card_image)
-            elif noimage_image:
-                card["original_image"] = noimage_image
-                card["image"] = noimage_photo_image
-
-        # EXデッキのカードをウィンドウに並べて配置
-        x, y = 20, 600  # 初期位置
-        for card in ex_deck:
-            card["x"], card["y"] = x, y
-            x += 15  # 横方向に配置を調整
-            if x > 900:  # 横幅が足りなくなったら改行
-                x = 20
-                y += 10
-            on_board.append(card)
-
-        draw_cards()
-        update_deck_count_display()  # デッキ枚数表示を更新
-        messagebox.showinfo("成功", f"デッキを読み込みました！カード数: {len(deck)}, EXデッキカード数: {len(ex_deck)}")
-    except Exception as e:
-        messagebox.showerror("エラー", f"デッキの読み込み中にエラーが発生しました:\n{e}")
-
-# デッキをシャッフルする関数
-def shuffle_deck():
-    global deck
-    if not deck:
-        messagebox.showinfo("エラー", "デッキが空です！")
-        return
-    random.shuffle(deck)  # デッキをランダムに並び替え
-
-    dice_label.place(relx=0.5, rely=0.5, anchor="center")
-    opponent_dice_label.place(relx=0.5, rely=0.5, anchor="center")
-    dice_label.config(text=f"シャッフル")
-    opponent_dice_label.config(text=f"シャッフル")
-
-    #messagebox.showinfo("成功", "デッキをシャッフルしました！")
-
-# 指定したカードIDでカードを生成しボードに追加する関数
-def select_card_by_id():
-    card_id = simpledialog.askstring("カードID入力", "カードIDを入力してください:")
-    if not card_id:
-        return
-    image_path = os.path.join("card-img", f"{card_id}.png")
-    if not os.path.exists(image_path):
-        messagebox.showinfo("エラー", "指定したIDのカード画像が見つかりません！")
-        return
-    card_image = Image.open(image_path).resize((78, 111))
-    card = {
-        "id": card_id,
-        "width": 78,
-        "height": 111,
-        "rotated": False,
-        "face_up": True,
-        "revealed": True,
-        "image": ImageTk.PhotoImage(card_image),
-        "original_image": card_image,
-        "x": 600,
-        "y": 500
-    }
-    adjust_card_position(card)  # 重なり防止の位置調整
-    on_board.append(card)
-    draw_cards()
-
-# カードが重ならないように位置を調整する関数
-def adjust_card_position(new_card):
-    offset_x, offset_y = 10, 2  # 少しずらす量
-    overlap = True
-    max_attempts = 100  # 無限ループ回避のための最大試行回数
-    attempts = 0
-    while overlap and attempts < max_attempts:
-        overlap = False
-        for card in on_board:
-            if abs(card["x"] - new_card["x"]) == 0 and abs(card["y"] - new_card["y"]) == 0:
-                # カードが重なっている場合、ずらす
-                new_card["x"] += offset_x
-                new_card["y"] += offset_y
-                
-                # 画面端に行きすぎた場合、逆方向にずらす
-                if new_card["x"] > 960 - new_card["width"]:
-                    new_card["x"] -= 2 * offset_x  # X方向を逆に
-                    offset_x = -offset_x  # 次のずらし方向を変更
-                if new_card["y"] > 720 - new_card["height"]:
-                    new_card["y"] -= 2 * offset_y  # Y方向を逆に
-                    offset_y = -offset_y  # 次のずらし方向を変更
-
-                # 画面内に収める
-                new_card["x"] = min(max(new_card["x"], 0), 960 - new_card["width"])
-                new_card["y"] = min(max(new_card["y"], 0), 720 - new_card["height"])
-                
-                overlap = True
-                break  # 重なりが見つかったら次の位置調整へ
-        attempts += 1
-    if attempts >= max_attempts:
-        messagebox.showwarning("警告", "カードの配置に失敗しました。位置調整を停止します。")
-
-def view_deck_contents():
-    global deck_window
-    if deck_window is not None and tk.Toplevel.winfo_exists(deck_window):
-        return
-
-    # カードIDと表示情報のマッピングを作成する関数
-    def load_card_list():
-        card_mapping = {}
-        try:
-            with open("CardList.txt", "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        card_id, display_name, card_ex = line.split(",", 2)
-                        card_mapping[card_id] = display_name
-        except FileNotFoundError:
-            messagebox.showerror("エラー", "CardList.txtが見つかりません！")
-        return card_mapping
-
-    # カードIDと表示情報のマッピングを読み込む
-    card_mapping = load_card_list()
-
-    # デッキの中身を表示するための新しいウィンドウを作成
-    deck_window = tk.Toplevel(root)
-    deck_window.title("デッキの中身を見る")  # ウィンドウタイトルを設定
-
-    # ウィンドウを中央に配置
-    center_window(root, deck_window, 800, 660)
-
-    deck_window.geometry("800x660")  # ウィンドウサイズを設定
-
-    # ウィンドウ全体を占めるメインフレームを作成
-    main_frame = tk.Frame(deck_window)
-    main_frame.pack(fill="both", expand=True)
-
-    # リストボックスと画像ラベルを配置するためのフレームを作成
-    frame = tk.Frame(main_frame)
-    frame.pack(fill="both", expand=True)
-
-    # デッキ内のカードリストを表示するためのリストボックス
-    listbox = tk.Listbox(frame, width=60, height=30)
-    listbox.pack(side="left", padx=10, pady=10)  # リストボックスを左側に配置
-
-    # 選択されたカードの画像を表示するためのラベル（固定サイズを設定）
-    image_frame = tk.Frame(frame, width=390, height=555, bg="white")
-    image_frame.pack_propagate(False)  # サイズ固定のためウィジェットの拡張を無効化
-    image_frame.pack(side="right", padx=10, pady=10)  # フレームを右側に配置
-
-    image_label = tk.Label(image_frame, text="", bg="white")
-    image_label.pack(expand=True, fill="both")  # ラベルをフレーム内で拡張
-
-    # デッキ内のカード表示名をリストボックスに追加
-    for card in deck:
-        display_name = card_mapping.get(card["id"], card["id"])  # 表示名を取得、なければIDを使用
-        listbox.insert(tk.END, display_name)
-
-    # リストボックスで選択されたカードの画像を表示する関数
-    def show_card_image():
-        selected_index = listbox.curselection()  # 選択されたカードのインデックスを取得
-        if not selected_index:  # カードが選択されていない場合は何もしない
-            return
-        selected_display_name = listbox.get(selected_index)  # リストボックスから表示名を取得
-        selected_card_id = next((card_id for card_id, display_name in card_mapping.items() if display_name == selected_display_name), None)
-        if not selected_card_id:
-            return
-        image_path = os.path.join("card-img", f"{selected_card_id}.png")  # カード画像のパスを作成
-        if os.path.exists(image_path):  # 画像が存在する場合
-            card_image = Image.open(image_path).resize((390, 555))  # 画像をリサイズ
-            photo_image_display = ImageTk.PhotoImage(card_image)  # Tkinter用のPhotoImageに変換
-            image_label.config(image=photo_image_display)  # ラベルに画像を設定
-            image_label.image = photo_image_display  # 参照を保持してガベージコレクションを防ぐ
-        else:
-            image_label.config(image="", text="画像が見つかりません")  # 画像が見つからない場合のエラーメッセージ
-
-    # デッキから選択されたカードをボードに移動する関数
-    def select_card_from_deck():
-        selected_index = listbox.curselection()  # 選択されたカードのインデックスを取得
-        if not selected_index:  # カードが選択されていない場合はエラーメッセージを表示
-            messagebox.showinfo("エラー", "カードを選択してください！")
-            return
-        selected_display_name = listbox.get(selected_index)  # リストボックスから表示名を取得
-        selected_card_id = next((card_id for card_id, display_name in card_mapping.items() if display_name == selected_display_name), None)
-        if not selected_card_id:
-            return
-        for card in deck:  # デッキ内でカードを検索
-            if card["id"] == selected_card_id:
-                card["x"], card["y"] = 600, 500  # カードの位置をボード上に設定
-                adjust_card_position(card)  # 重なり防止の位置調整
-                on_board.append(card)  # カードをボードに追加
-                deck.remove(card)  # デッキからカードを削除
-                draw_cards()  # ボードを再描画
-                update_deck_count_display()  # デッキ枚数表示を更新
-                deck_window.destroy()  # ウィンドウを閉じる
-                return
-
-    # リストボックスの選択イベントにshow_card_image関数をバインド
-    listbox.bind("<<ListboxSelect>>", lambda _: show_card_image())
-
-    # ウィンドウ下部にボタンを配置するためのフレームを作成
-    button_frame = tk.Frame(deck_window)
-    button_frame.pack(fill="x", side="bottom", pady=10)  # ボタンフレームを下部に配置
-
-    # デッキから選択されたカードをボードに移動するボタン
-    select_button = tk.Button(button_frame, text="選択したカードを出す", command=select_card_from_deck)
-    select_button.pack()  # ボタンをボタンフレームに追加
-
-def add_marker():
-    marker = {
-        "type": "marker",
-        "x": canvas.winfo_width() // 2 - 60,  # キャンバスの中央 (幅の半分 - マーカーの半分)
-        "y": int(canvas.winfo_height() * 0.9),  # キャンバスの下の方 (高さの90%の位置)
-        "width": 120,
-        "height": 50,
-        "text": "",
-        "selected": False
-    }
-    markers.append(marker)
-    draw_cards()
 
 def create_translucent_rectangle(width, height, color, alpha):
-    image = Image.new("RGBA", (width, height), (255, 255, 255, 0))  # 透明な背景
+    image = Image.new("RGBA", (width, height), (255, 255, 255, 0))
     draw = ImageDraw.Draw(image)
-    draw.rectangle([(0, 0), (width, height)], fill=(*color, alpha))  # RGBAで塗りつぶし
+    draw.rectangle([(0, 0), (width, height)], fill=(*color, alpha))
     return ImageTk.PhotoImage(image)
 
 def draw_text_with_outline(draw, position, text, font, text_color, outline_color, outline_width, marker_width, marker_height, text_width, text_height):
-    """
-    マーカーの中心に文字列を描画し、縁取りを加える。
-
-    引数:
-    - draw: ImageDrawオブジェクト（Pillowの描画用オブジェクト）
-    - position: マーカーの左上座標 (x, y) を格納したタプル
-    - text: 描画する文字列
-    - font: 使用するフォントオブジェクト
-    - text_color: テキストの色
-    - outline_color: 縁取りの色
-    - outline_width: 縁取りの太さ（ピクセル単位）
-    - marker_width: マーカーの幅
-    - marker_height: マーカーの高さ
-    """
     x, y = position
-
-    # 中心位置を計算
     text_x = x + (marker_width - text_width) // 2
     text_y = y + (marker_height - text_height) // 2 - 2
-
-    # 縁取りを描画
     for dx in range(-outline_width, outline_width + 1):
         for dy in range(-outline_width, outline_width + 1):
-            if dx != 0 or dy != 0:  # 中心を除外
+            if dx != 0 or dy != 0:
                 draw.text((text_x + dx, text_y + dy), text, font=font, fill=outline_color)
-
-    # 中央に本来のテキストを描画
     draw.text((text_x, text_y), text, font=font, fill=text_color)
 
-# ボード上のカードを描画する関数
-def draw_cards():
-    global reverse_button, bring_to_front_button, send_to_back_button, playmat_photo, selected_card
-    canvas.delete("all")  # キャンバスをクリア
-    # プレイマット画像を背景に描画
-    if playmat_photo:
-        canvas.create_image(0, 0, image=playmat_photo, anchor="nw")
-        canvas.playmat_photo = playmat_photo  # 参照を保持してガベージコレクションを防ぐ
+class ShuffleMyriadApp:
+    def __init__(self, root):
+        self.root = root
+        self.opponent_refresh_rate = load_config()
 
-    # カードの描画
-    for card in on_board:
-        # カードの位置とサイズを取得
-        x, y, w, h = max(0, min(card.get("x", 0), 960 - card.get("width", 78))), max(0, min(card.get("y", 0), 720 - card.get("height", 111))), card.get("width", 78), card.get("height", 111)
-        card["x"], card["y"] = x, y
-        # 表向きかどうかで描画内容を変更
-        if card.get("face_up", True):
-            if card.get("original_image"):
-                if card.get("rotated"):
-                    # 横向き（回転状態）のカードを描画
-                    rotated_image = card["original_image"].rotate(90, expand=True).resize((111, 78))
-                    card["image"] = ImageTk.PhotoImage(rotated_image)
-                    card["width"], card["height"] = 111, 78
+        self._setup_main_window()
+
+        self.deck = []
+        self.ex_deck = []
+        self.on_board = []
+        self.markers = []
+        self.selected_card = None
+        self.is_dragging = False
+        self.drag_offset_x = 0
+        self.drag_offset_y = 0
+
+        self.last_displayed_image = None # For InfoWindow
+        self.life_points = tk.IntVar(value=0)
+
+        self._load_default_images()
+        self._setup_ui_elements()
+        self._bind_events()
+
+        self.info_window_instance = None
+        self.opponent_window_instance = None
+        self.deck_contents_window_instance = None
+        self.marker_edit_window_instance = None
+        
+        self.draw_cards()
+        self.root.after(100, self._show_initial_windows)
+
+
+    def _setup_main_window(self):
+        self.root.title("ShuffleMyriad_Simulator")
+        self.root.geometry("960x860")
+        center_tk_window(None, self.root, 960, 860) # Center on screen initially
+        self.root.resizable(False, False)
+        self.canvas = tk.Canvas(self.root, width=960, height=720, bg="white")
+        self.canvas.pack()
+
+    def _load_default_images(self):
+        self.playmat_path = os.path.join("resource", "playmat.png")
+        try:
+            self.playmat_image_pil = Image.open(self.playmat_path).resize((960, 720))
+            self.playmat_photo = ImageTk.PhotoImage(self.playmat_image_pil)
+        except FileNotFoundError:
+            self.playmat_image_pil = Image.new("RGB", (960,720), "lightgrey")
+            self.playmat_photo = ImageTk.PhotoImage(self.playmat_image_pil)
+            print(f"Warning: Playmat image not found at {self.playmat_path}")
+
+
+        self.reverse_image_path = os.path.join("resource", "reverse.png")
+        try:
+            self.reverse_image_pil = Image.open(self.reverse_image_path).resize((78, 111))
+            self.reverse_photo_image = ImageTk.PhotoImage(self.reverse_image_pil)
+            self.reverse_rotated_image_pil = self.reverse_image_pil.rotate(90, expand=True).resize((111, 78))
+            self.reverse_rotated_photo_image = ImageTk.PhotoImage(self.reverse_rotated_image_pil)
+        except FileNotFoundError:
+            self.reverse_image_pil = None
+            self.reverse_photo_image = None
+            self.reverse_rotated_image_pil = None
+            self.reverse_rotated_photo_image = None
+            print(f"Warning: Reverse card image not found at {self.reverse_image_path}")
+
+        noimage_path = os.path.join("resource", "noimage.png")
+        try:
+            self.noimage_pil = Image.open(noimage_path).resize((78, 111))
+            self.noimage_photo_image = ImageTk.PhotoImage(self.noimage_pil)
+            self.noimage_large_pil = self.noimage_pil.resize((390, 555))
+            self.noimage_large_photo_image = ImageTk.PhotoImage(self.noimage_large_pil)
+        except FileNotFoundError:
+            self.noimage_pil = None
+            self.noimage_photo_image = None
+            self.noimage_large_pil = None
+            self.noimage_large_photo_image = None
+            print(f"Warning: 'noimage.png' not found in resource folder.")
+
+
+        unknown_image_path = os.path.join("resource", "unknown.png")
+        try:
+            self.unknown_image_pil = Image.open(unknown_image_path).resize((390, 555))
+            self.unknown_photo_image = ImageTk.PhotoImage(self.unknown_image_pil)
+        except FileNotFoundError:
+            self.unknown_image_pil = None
+            self.unknown_photo_image = None
+            print(f"Warning: 'unknown.png' not found in resource folder.")
+            if self.noimage_large_photo_image: # Fallback to noimage if unknown is missing
+                 self.unknown_photo_image = self.noimage_large_photo_image
+
+
+        # Buttons that appear on card selection
+        self.reverse_button = None
+        self.bring_to_front_button = None
+        self.send_to_back_button = None
+
+    def _setup_ui_elements(self):
+        button_frame = tk.Frame(self.root)
+        button_frame.pack()
+
+        bottom_right_frame = tk.Frame(self.root)
+        bottom_right_frame.place(relx=1.0, rely=1.0, anchor="se")
+
+        bottom_left_frame = tk.Frame(self.root)
+        bottom_left_frame.place(relx=0.0, rely=1.0, anchor="sw")
+
+        tk.Label(bottom_left_frame, text="ライフポイント:").pack(side="top", padx=5, pady=2)
+        validate_cmd = self.root.register(self._validate_life_input)
+        life_spinbox = tk.Spinbox(
+            bottom_left_frame, from_=0, to=999999, increment=1,
+            textvariable=self.life_points, width=8, validate="key",
+            validatecommand=(validate_cmd, "%P")
+        )
+        life_spinbox.pack(side="top", padx=5, pady=2)
+
+        self.deck_count_label = tk.Label(bottom_left_frame, text=f"デッキ: {len(self.deck)}枚", font=("Arial", 10))
+        self.deck_count_label.pack(side="top", padx=5, pady=2)
+
+        gacha_button_frame = tk.Frame(bottom_left_frame)
+        gacha_button_frame.pack(side="top", padx=5, pady=2)
+        
+        gacha_buttons_config = [("コイントス", self.coin_toss), ("6面ダイス", self.roll_dice)]
+        for i, (text, command) in enumerate(gacha_buttons_config):
+            btn = tk.Button(gacha_button_frame, text=text, command=command)
+            btn.grid(row=0, column=i, padx=2, pady=2)
+
+        main_buttons_config = [
+            ("デッキトップへ戻す", self.move_to_deck_top),
+            ("デッキボトムへ戻す", self.move_to_deck_bottom),
+            ("すべて回転解除", self.unrotate_all),
+            ("ドロー", self.draw_from_deck),
+            ("シャッフル", self.shuffle_deck),
+            ("マーカーを追加", self.add_marker),
+            ("カードID指定生成", self.select_card_by_id),
+            ("デッキから表向きで出す", lambda: self.draw_from_deck(y=350)),
+            ("デッキから裏向きで出す", lambda: self.draw_from_deck(face_up=False, y=350)),
+            ("デッキの中身を見る", self.open_deck_contents_window),
+        ]
+        for i, (text, command) in enumerate(main_buttons_config):
+            btn = tk.Button(button_frame, text=text, command=command)
+            btn.grid(row=i // 5, column=i % 5, padx=5, pady=5)
+
+        special_buttons_config = [
+            ("100連ガチャ", self.gacha_deck_making),
+            ("デッキをロード", self.load_deck),
+            ("盤面のセーブ", self.save_board),
+            ("盤面のロード", self.load_board),
+            ("再起動", self.restart_app),
+        ]
+        for i, (text, command) in enumerate(special_buttons_config):
+            btn = tk.Button(bottom_right_frame, text=text, command=command)
+            btn.grid(row=i // 2, column=i % 2, padx=5, pady=5)
+
+        self.dice_label = tk.Label(self.root, text="", font=("YuGothB.ttc", 24), bg="white")
+        # Opponent dice label will be managed by OpponentWindow
+
+    def _validate_life_input(self, new_value):
+        if new_value == "": return True
+        try:
+            val = int(new_value)
+            return 0 <= val <= 999999
+        except ValueError:
+            return False
+
+    def _bind_events(self):
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+        self.canvas.bind("<Button-3>", self._on_canvas_right_click)
+        self.root.bind("<Delete>", self._on_delete_key)
+        self.canvas.bind("<Double-1>", self._on_canvas_double_click)
+        self.root.bind("<Control-t>", lambda event: self.move_to_deck_top())
+        self.root.bind("<Control-b>", lambda event: self.move_to_deck_bottom())
+        self.root.bind("<Control-f>", lambda event: self.bring_to_front())
+        self.root.bind("<Control-r>", lambda event: self.send_to_back())
+        self.root.bind("<Control-c>", self._copy_card_id_to_clipboard)
+
+    def _show_initial_windows(self):
+        self.open_info_window()
+        self.open_opponent_window()
+
+    def _update_dynamic_buttons_visibility(self):
+        # Hide existing buttons first
+        if self.reverse_button: self.reverse_button.place_forget()
+        if self.bring_to_front_button: self.bring_to_front_button.place_forget()
+        if self.send_to_back_button: self.send_to_back_button.place_forget()
+
+        if self.selected_card and self.selected_card not in self.markers and not self.is_dragging:
+            if not self.reverse_button: # Create if not exists
+                self.reverse_button = tk.Button(self.root, text="リバース", command=self.reverse_card)
+                self.bring_to_front_button = tk.Button(self.root, text="最前面", command=self.bring_to_front)
+                self.send_to_back_button = tk.Button(self.root, text="最背面", command=self.send_to_back)
+
+            button_x = self.selected_card["x"] + self.selected_card["width"] // 2 - 22 # Approx center
+            button_y = self.selected_card["y"] + self.selected_card["height"] + 5
+
+            self.reverse_button.place(x=button_x, y=button_y)
+            self.bring_to_front_button.place(x=button_x - 50, y=button_y) # Adjust relative positions as needed
+            self.send_to_back_button.place(x=button_x + 50, y=button_y)
+
+
+    def draw_cards(self):
+        self.canvas.delete("all")
+        if self.playmat_photo:
+            self.canvas.create_image(0, 0, image=self.playmat_photo, anchor="nw")
+
+        # Draw cards
+        for card_data in self.on_board:
+            x = max(0, min(card_data.get("x", 0), 960 - card_data.get("width", 78)))
+            y = max(0, min(card_data.get("y", 0), 720 - card_data.get("height", 111)))
+            card_data["x"], card_data["y"] = x, y # Update stored position
+
+            img_to_draw = None
+            if card_data.get("face_up", True):
+                if card_data.get("original_image"): # PIL Image
+                    current_pil_image = card_data["original_image"]
+                    if card_data.get("rotated"):
+                        rotated_pil_image = current_pil_image.rotate(90, expand=True).resize((111, 78))
+                        card_data["image"] = ImageTk.PhotoImage(rotated_pil_image) # Update TkImage
+                        card_data["width"], card_data["height"] = 111, 78
+                    else:
+                        resized_pil_image = current_pil_image.resize((78, 111))
+                        card_data["image"] = ImageTk.PhotoImage(resized_pil_image) # Update TkImage
+                        card_data["width"], card_data["height"] = 78, 111
+                    img_to_draw = card_data["image"]
+                elif self.noimage_photo_image: 
+                    img_to_draw = self.noimage_photo_image 
+                    card_data["width"], card_data["height"] = (111,78) if card_data.get("rotated") else (78,111)
+
+
+            else: # Face down
+                if card_data.get("rotated"):
+                    img_to_draw = self.reverse_rotated_photo_image
+                    card_data["width"], card_data["height"] = 111, 78
                 else:
-                    # 通常のカードを描画
-                    card["image"] = ImageTk.PhotoImage(card["original_image"].resize((78, 111)))
-                    card["width"], card["height"] = 78, 111
-                canvas.create_image(x, y, image=card["image"], anchor="nw")
-        else:
-            # 裏向きのカードを描画
-            if card.get("rotated"):
-                if reverse_rotated_photo_image:
-                    canvas.create_image(x, y, image=reverse_rotated_photo_image, anchor="nw")
-                    card["width"], card["height"] = 111, 78
-            else:
-                if reverse_photo_image:
-                    canvas.create_image(x, y, image=reverse_photo_image, anchor="nw")
-                    card["width"], card["height"] = 78, 111
-        # 選択中のカードを強調表示
-        if card == selected_card:
-            canvas.create_rectangle(x, y, x + card["width"], y + card["height"], outline="red", width=3)
-
-    # ボタンの再配置（選択中のカード用）
-    if reverse_button:
-        reverse_button.place_forget()
-    if bring_to_front_button:
-        bring_to_front_button.place_forget()
-    if send_to_back_button:
-        send_to_back_button.place_forget()
-    
-    # 選択中のカードがマーカーでない場合にのみボタンを表示
-    if selected_card and selected_card not in markers and is_dragging == False:
-        reverse_button = tk.Button(root, text="リバース", command=reverse_card)
-        bring_to_front_button = tk.Button(root, text="最前面", command=bring_to_front)
-        send_to_back_button = tk.Button(root, text="最背面", command=send_to_back)
-
-        button_x = selected_card["x"] + selected_card["width"] // 2 - 22
-        button_y = selected_card["y"] + selected_card["height"] + 5
-
-        reverse_button.place(x=button_x, y=button_y)
-        bring_to_front_button.place(x=button_x - 50, y=button_y)
-        send_to_back_button.place(x=button_x + 50, y=button_y)
-
-    # Pillow用の背景画像を作成
-    canvas_width = canvas.winfo_width()
-    canvas_height = canvas.winfo_height()
-    background = Image.new("RGBA", (canvas_width, canvas_height), (255, 255, 255, 0))
-
-    draw = ImageDraw.Draw(background)
-
-    for marker in markers:
-        if marker["text"]:
-            # 一時的なテキスト描画オブジェクトを作成
-            bbox = draw.textbbox((0, 0), marker["text"], font=ImageFont.truetype("YuGothB", 14))
-            if bbox:  # テキストのサイズ計算が正常に行えた場合
-                marker["text_width"] = bbox[2] - bbox[0]
-                marker["text_height"] = bbox[3] - bbox[1]
-                marker["width"] = max(marker["text_width"] + 20, 120)  # 最小幅を設定
-                marker["height"] = max(marker["text_height"] + 10, 50)  # 最小高さを設定
-            else:
-                # テキストのバウンディングボックスが計算できない場合はデフォルトサイズを設定
-                marker["width"] = 120
-                marker["height"] = 50
-        x, y, w, h = marker["x"], marker["y"], marker["width"], marker["height"]
-
-        # マーカーの背景を描画
-        translucent_color = (128, 128, 128, 128)  # 灰色の半透明
-        draw.rectangle([x, y, x + w, y + h], fill=translucent_color)
-
-        # マーカーのテキストを描画
-        outline_width = 2
-        if marker["text"]:
-            draw_text_with_outline(draw, (x, y), marker["text"],
-                                   font=ImageFont.truetype("YuGothB.ttc", 14),
-                                   text_color="black", outline_color="white",
-                                   outline_width=outline_width,
-                                   marker_width=w,  # キーワード引数
-                                   marker_height=h,  # キーワード引数
-                                   text_width=marker["text_width"], text_height=marker["text_height"]
-                                   )
-        if marker == selected_card:
-            canvas.create_rectangle(x, y, x + w, y + h, outline="red", width=3)
-
-    # Pillow画像をTkinterキャンバスに表示
-    background_photo = ImageTk.PhotoImage(background)
-    canvas.create_image(0, 0, image=background_photo, anchor="nw")
-    canvas.photo_image = background_photo  # 参照を保持してガベージコレクションを防ぐ
-
-def update_info_display():
-    global last_displayed_image
-    for widget in info_window.winfo_children():
-        widget.destroy()
-    if selected_card and "id" in selected_card:
-        if not selected_card.get("revealed", False):  # 表示されていない場合
-            image_path = os.path.join("resource", "unknown.png")
-        else:
-            image_path = os.path.join("card-img", f"{selected_card['id']}.png")
-        if os.path.exists(image_path):
-            image_display = Image.open(image_path).resize((390, 555))
-            photo_image_display = ImageTk.PhotoImage(image_display)
-            last_displayed_image = photo_image_display  # 現在の画像を保持
-            label = tk.Label(info_window, image=photo_image_display)
-            label.photo = photo_image_display
-            label.pack()
-        else:
-            tk.Label(info_window, text="画像が見つかりません", fg="red").pack()
-    elif last_displayed_image:
-        # 最後に表示した画像を表示
-        label = tk.Label(info_window, image=last_displayed_image)
-        label.photo = last_displayed_image
-        label.pack()
-    else:
-        tk.Label(info_window, text="有効なカードが選択されていません", fg="red").pack()
+                    img_to_draw = self.reverse_photo_image
+                    card_data["width"], card_data["height"] = 78, 111
             
-def select_card(event):
-    root.focus()
-    dice_label_forget()
-    global selected_card, is_dragging, drag_offset_x, drag_offset_y
-    for marker in reversed(markers):
-        if marker["x"] < event.x < marker["x"] + marker["width"] and marker["y"] < event.y < marker["y"] + marker["height"]:
-            selected_card = marker
-            is_dragging = True
-            drag_offset_x = event.x - marker["x"]
-            drag_offset_y = event.y - marker["y"]
-            draw_cards()
-            update_info_display()  # 情報ウィンドウを更新
+            if img_to_draw:
+                self.canvas.create_image(x, y, image=img_to_draw, anchor="nw")
+            
+            if card_data == self.selected_card:
+                self.canvas.create_rectangle(x, y, x + card_data["width"], y + card_data["height"], outline="red", width=3)
+
+        self._update_dynamic_buttons_visibility()
+
+        if self.markers:
+            marker_layer_pil = Image.new("RGBA", (self.canvas.winfo_width(), self.canvas.winfo_height()), (255, 255, 255, 0))
+            draw_pil = ImageDraw.Draw(marker_layer_pil)
+            
+            try:
+                font = ImageFont.truetype("YuGothB.ttc", 14) 
+            except IOError:
+                font = ImageFont.load_default()
+
+
+            for marker in self.markers:
+                text_width, text_height = 0, 0
+                if marker["text"]:
+                    try:
+                        bbox = draw_pil.textbbox((0,0), marker["text"], font=font)
+                        text_width = bbox[2] - bbox[0]
+                        text_height = bbox[3] - bbox[1]
+                    except Exception as e: 
+                         print(f"Could not get textbbox for marker text '{marker['text']}': {e}")
+
+                marker["text_width"] = text_width
+                marker["text_height"] = text_height
+                marker["width"] = max(marker["text_width"] + 20, 120)
+                marker["height"] = max(marker["text_height"] + 10, 50)
+                
+                mx, my, mw, mh = marker["x"], marker["y"], marker["width"], marker["height"]
+                
+                translucent_color_pil = (128, 128, 128, 128) # RGBA
+                draw_pil.rectangle([mx, my, mx + mw, my + mh], fill=translucent_color_pil)
+
+                if marker["text"]:
+                    draw_text_with_outline(draw_pil, (mx, my), marker["text"], font,
+                                           "black", "white", 2, 
+                                           mw, mh, text_width, text_height)
+                
+                if marker == self.selected_card: 
+                    self.canvas.create_rectangle(mx, my, mx + mw, my + mh, outline="red", width=3)
+
+            self.marker_layer_tk = ImageTk.PhotoImage(marker_layer_pil)
+            self.canvas.create_image(0,0, image=self.marker_layer_tk, anchor="nw")
+
+        self.update_deck_count_display()
+        if self.info_window_instance:
+            self.info_window_instance.update_display()
+        if self.opponent_window_instance and self.opponent_window_instance.is_active():
+            self.opponent_window_instance.needs_redraw = True
+
+    def load_deck(self):
+        base_path = os.path.dirname(sys.argv[0]) if getattr(sys, 'frozen', False) else os.getcwd()
+        deck_folder_path = os.path.join(base_path, "deck")
+        if not os.path.exists(deck_folder_path):
+            try:
+                os.makedirs(deck_folder_path)
+                print(f"Created directory: {deck_folder_path}")
+            except OSError as e:
+                messagebox.showerror("エラー", f"deckフォルダの作成に失敗しました: {e}")
+                return 
+
+        file_path = filedialog.askopenfilename(
+            title="デッキデータを選択",
+            filetypes=[("テキストファイル", "*.txt"), ("すべてのファイル", "*.*")],
+            initialdir=deck_folder_path 
+        )
+        if not file_path: return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                lines = [line.strip() for line in file if line.strip()]
+
+            resource_section_content = []
+            if "[Resource]" in lines:
+                resource_index = lines.index("[Resource]")
+                resource_section_content = lines[resource_index + 1:]
+                lines = lines[:resource_index]
+
+            new_reverse_path = os.path.join("resource", resource_section_content[0]) if len(resource_section_content) > 0 else os.path.join("resource", "reverse.png")
+            new_playmat_path = os.path.join("resource", resource_section_content[1]) if len(resource_section_content) > 1 else os.path.join("resource", "playmat.png")
+
+            if new_reverse_path != self.reverse_image_path or not self.reverse_image_pil:
+                self.reverse_image_path = new_reverse_path
+                try:
+                    self.reverse_image_pil = Image.open(self.reverse_image_path).resize((78, 111))
+                    self.reverse_photo_image = ImageTk.PhotoImage(self.reverse_image_pil)
+                    self.reverse_rotated_image_pil = self.reverse_image_pil.rotate(90, expand=True).resize((111, 78))
+                    self.reverse_rotated_photo_image = ImageTk.PhotoImage(self.reverse_rotated_image_pil)
+                except FileNotFoundError:
+                    print(f"Warning: Custom reverse image not found at {self.reverse_image_path}, using default or none.")
+                    if not os.path.exists(self.reverse_image_path): 
+                        self.reverse_image_pil = None
+                        self.reverse_photo_image = None
+                        self.reverse_rotated_image_pil = None
+                        self.reverse_rotated_photo_image = None
+
+
+            if new_playmat_path != self.playmat_path or not self.playmat_image_pil:
+                self.playmat_path = new_playmat_path
+                try:
+                    self.playmat_image_pil = Image.open(self.playmat_path).resize((960, 720))
+                    self.playmat_photo = ImageTk.PhotoImage(self.playmat_image_pil)
+                except FileNotFoundError:
+                    print(f"Warning: Custom playmat image not found at {self.playmat_path}, using default or none.")
+                    if not os.path.exists(self.playmat_path): 
+                        self.playmat_image_pil = Image.new("RGB", (960,720), "lightgrey")
+                        self.playmat_photo = ImageTk.PhotoImage(self.playmat_image_pil)
+
+
+            self.deck = []
+            self.ex_deck = []
+            
+            main_deck_lines = lines
+            if "[EX]" in lines:
+                ex_index = lines.index("[EX]")
+                main_deck_lines = lines[:ex_index]
+                ex_deck_lines = lines[ex_index + 1:]
+                for card_id in ex_deck_lines:
+                    self.ex_deck.append(self._create_card_dict(card_id, face_up=True, revealed=True))
+            
+            for card_id in main_deck_lines:
+                self.deck.append(self._create_card_dict(card_id, face_up=True, revealed=True))
+
+            x, y = 20, 600
+            for card_data in self.ex_deck:
+                card_data["x"], card_data["y"] = x, y
+                self.on_board.append(card_data) 
+                x += 15
+                if x > 900: x, y = 20, y + 10
+            
+            self.draw_cards()
+            messagebox.showinfo("成功", f"デッキを読み込みました！カード数: {len(self.deck)}, EXデッキカード数: {len(self.ex_deck)}")
+        except Exception as e:
+            messagebox.showerror("エラー", f"デッキの読み込み中にエラーが発生しました:\n{e}")
+
+
+    def _create_card_dict(self, card_id, x=0, y=0, rotated=False, face_up=True, revealed=True):
+        card_data = {
+            "id": card_id, "width": 78, "height": 111,
+            "rotated": rotated, "face_up": face_up, "revealed": revealed,
+            "image": None, "original_image": None, 
+            "x": x, "y": y
+        }
+        image_path = os.path.join("card-img", f"{card_id}.png")
+        try:
+            pil_img = Image.open(image_path) 
+            card_data["original_image"] = pil_img
+        except FileNotFoundError:
+            if self.noimage_pil:
+                card_data["original_image"] = self.noimage_pil.copy() 
+        return card_data
+
+    def shuffle_deck(self):
+        if not self.deck:
+            messagebox.showinfo("エラー", "デッキが空です！")
             return
-    for card in reversed(on_board):
-        if card["x"] < event.x < card["x"] + card["width"] and card["y"] < event.y < card["y"] + card["height"]:
-            selected_card = card
-            is_dragging = True
-            drag_offset_x = event.x - card["x"]
-            drag_offset_y = event.y - card["y"]
-            draw_cards()
-            update_info_display()  # 情報ウィンドウを更新
+        random.shuffle(self.deck)
+        self._show_temporary_message("シャッフル")
+
+    def _show_temporary_message(self, message_text):
+        self.dice_label.config(text=message_text)
+        self.dice_label.place(relx=0.5, rely=0.5, anchor="center")
+        if self.opponent_window_instance and self.opponent_window_instance.is_active():
+            self.opponent_window_instance.show_dice_result(message_text)
+
+    def select_card_by_id(self):
+        card_id = simpledialog.askstring("カードID入力", "カードIDを入力してください:")
+        if not card_id: return
+
+        image_path = os.path.join("card-img", f"{card_id}.png")
+        if not (os.path.exists(image_path) or self.noimage_pil): 
+            messagebox.showinfo("エラー", "指定したIDのカード画像が見つかりません（noimage.pngもありません）！")
             return
-    selected_card = None
-    is_dragging = False
-    drag_offset_x = None
-    drag_offset_y = None
-    update_info_display()  # 選択が解除された場合も情報ウィンドウを更新
 
-def move_card(event):
-    global selected_card, drag_offset_x, drag_offset_y
-    if selected_card and is_dragging and drag_offset_x is not None and drag_offset_y is not None:
-        selected_card["x"] = event.x - drag_offset_x
-        selected_card["y"] = event.y - drag_offset_y
-        draw_cards()
+        card_data = self._create_card_dict(card_id, x=600, y=500, face_up=True, revealed=True)
+        self._adjust_card_position(card_data)
+        self.on_board.append(card_data)
+        self.selected_card = card_data 
+        self.draw_cards()
 
-def release_card(event):
-    global is_dragging
-    is_dragging = False
-    draw_cards()
-
-def edit_marker_text():
-    global edit_window
-    if edit_window is not None and tk.Toplevel.winfo_exists(edit_window):
-        # 編集ウインドウが既に存在している場合
-        return
-    if selected_card and selected_card.get("type") == "marker":
-        edit_window = tk.Toplevel(root)
-        edit_window.title("テキスト編集")
-
-        # 適切なサイズのウィンドウに調整
-        text_width = 30
-        text_height = 5
-        window_width = text_width * 8 + 10  # 文字幅×8 + 余白
-        window_height = text_height * 20 + 30  # 行数×20 + ボタンと余白
-        center_window(root, edit_window, window_width, window_height)
-
-        text_box = tk.Text(edit_window, width=text_width, height=text_height)
-        text_box.insert(tk.END, selected_card["text"])
-        text_box.pack(pady=10)
-
-        def save_text():
-            global edit_window
-            new_text = text_box.get("1.0", tk.END).strip()
-            if new_text:
-                selected_card["text"] = new_text
-            if edit_window is not None:
-                edit_window.destroy()
-                edit_window = None
-            draw_cards()
-
-        save_button = tk.Button(edit_window, text="保存", command=save_text)
-        save_button.pack()
-
-        # ウインドウを閉じる際に参照をリセット
-        def on_close():
-            global edit_window
-            if edit_window is not None:  # Noneチェックを追加
-                edit_window.destroy()
-                edit_window = None
-
-        edit_window.protocol("WM_DELETE_WINDOW", on_close)
+    def _adjust_card_position(self, new_card):
+        offset_x_orig, offset_y_orig = 10, 2
+        offset_x, offset_y = offset_x_orig, offset_y_orig
+        max_attempts = 100
+        attempts = 0
         
-def rotate_card():
-    if not selected_card:
-        messagebox.showinfo("エラー", "カードを選択してください！")
-        return
-    if selected_card["rotated"]:
-        selected_card["x"] = selected_card["x"] + 16
-        selected_card["y"] = selected_card["y"] - 16
-    else:
-        selected_card["x"] = selected_card["x"] - 16
-        selected_card["y"] = selected_card["y"] + 16
-    selected_card["rotated"] = not selected_card["rotated"]
-    draw_cards()
+        while attempts < max_attempts:
+            overlap = False
+            for card in self.on_board:
+                if card is new_card: continue 
+                if abs(card["x"] - new_card["x"]) == 0 and abs(card["y"] - new_card["y"]) == 0:
+                    new_card["x"] += offset_x
+                    new_card["y"] += offset_y
 
-def right_click(event):
-    global selected_card
-    for card in reversed(on_board):
-        if card["x"] < event.x < card["x"] + card["width"] and card["y"] < event.y < card["y"] + card["height"]:
-            selected_card = card
-            if selected_card["rotated"]:
-                selected_card["x"] = selected_card["x"] + 16
-                selected_card["y"] = selected_card["y"] - 16
-            else:
-                selected_card["x"] = selected_card["x"] - 16
-                selected_card["y"] = selected_card["y"] + 16
-            selected_card["rotated"] = not selected_card["rotated"]
-            draw_cards()
-            return
+                    if new_card["x"] + new_card.get("width", 78) > 960 or new_card["x"] < 0:
+                        new_card["x"] -= 2 * offset_x 
+                        offset_x *= -1 
+                    if new_card["y"] + new_card.get("height", 111) > 720 or new_card["y"] < 0:
+                        new_card["y"] -= 2 * offset_y
+                        offset_y *= -1
 
-def reverse_card():
-    if not selected_card:
-        messagebox.showinfo("エラー", "カードを選択してください！")
-        return
-    selected_card["face_up"] = not selected_card["face_up"]
-    if selected_card["face_up"]:  # 表向きになった場合
-        selected_card["revealed"] = True
-    draw_cards()
-    update_info_display()
+                    new_card["x"] = max(0, min(new_card["x"], 960 - new_card.get("width", 78)))
+                    new_card["y"] = max(0, min(new_card["y"], 720 - new_card.get("height", 111)))
+                    
+                    overlap = True
+                    break 
+            if not overlap:
+                return 
+            attempts += 1
+            if attempts % 10 == 0: 
+                offset_x, offset_y = offset_x_orig, offset_y_orig
+                new_card["x"] += random.randint(-5,5) 
+                new_card["y"] += random.randint(-5,5)
 
-def bring_to_front():
-    if not selected_card:
-        messagebox.showinfo("エラー", "カードを選択してください！")
-        return
-    on_board.remove(selected_card)
-    on_board.append(selected_card)
-    draw_cards()
 
-def send_to_back():
-    if not selected_card:
-        messagebox.showinfo("エラー", "カードを選択してください！")
-        return
-    on_board.remove(selected_card)
-    on_board.insert(0, selected_card)
-    draw_cards()
+        if attempts >= max_attempts:
+            print("Warning: Max attempts reached for card position adjustment. Card may overlap.")
 
-def move_to_deck_top():
-    global selected_card
-    if not selected_card:
-        messagebox.showinfo("エラー", "カードを選択してください！")
-        return
-    on_board.remove(selected_card)
-    deck.insert(0, selected_card)
-    selected_card = None
-    draw_cards()
-    update_deck_count_display()  # デッキ枚数表示を更新
+    def add_marker(self):
+        marker = {
+            "type": "marker",
+            "x": self.canvas.winfo_width() // 2 - 60,
+            "y": int(self.canvas.winfo_height() * 0.9),
+            "width": 120, "height": 50,
+            "text": "", "selected": False, 
+            "text_width": 0, "text_height": 0 
+        }
+        self.markers.append(marker)
+        self.selected_card = marker 
+        self.draw_cards()
 
-def move_to_deck_bottom():
-    global selected_card
-    if not selected_card:
-        messagebox.showinfo("エラー", "カードを選択してください！")
-        return
-    on_board.remove(selected_card)
-    deck.append(selected_card)
-    selected_card = None
-    draw_cards()
-    update_deck_count_display()  # デッキ枚数表示を更新
 
-def unrotate_all():
-    for card in on_board:
-        if card["rotated"] == True:
-            card["rotated"] = False
-            card["x"] = card["x"] + 16
-            card["y"] = card["y"] - 16
-    draw_cards()
-
-def draw_from_deck(face_up=True, x=600, y=500):
-    global selected_card
-    if not deck:
-        messagebox.showinfo("デッキ", "デッキにカードがありません！")
-        return
-    card = deck.pop(0)
-    card["x"] = x
-    card["y"] = y
-    card["rotated"] = False
-    card["face_up"] = face_up
-    card["revealed"] = face_up  # 表向きの場合のみ revealed を True に
-    adjust_card_position(card)  # 重なり防止の位置調整
-    on_board.append(card)
-    selected_card = card
-    draw_cards()
-    update_deck_count_display()  # デッキ枚数表示を更新
-    update_info_display()
-
-# 対戦者用ウインドウを開く関数
-def open_opponent_window():
-    global opponent_window
-    if opponent_window is not None and tk.Toplevel.winfo_exists(opponent_window):
-        return
-    
-    opponent_window = tk.Toplevel(root)  # 新しいウインドウを作成
-    opponent_window.title("対戦者用ウインドウ")  # ウィンドウのタイトルを設定
-    opponent_window.geometry("960x720")  # ウィンドウサイズを設定
-
-    # サイズ変更を無効化
-    opponent_window.resizable(False, False)
-
-    def disable_close():
-        pass  # 何もしないことで閉じる操作を無効化
-    info_window.protocol("WM_DELETE_WINDOW", disable_close)
-
-    # 対戦者用ウィンドウをメインウィンドウの背面に表示
-    x = root.winfo_x() + 64
-    y = root.winfo_y() + 64
-    opponent_window.geometry(f"960x720+{x}+{y}")
-    opponent_window.lower()  # 背面に移動
-
-    global playmat_path, playmat_image, playmat_photo_opponent, opponent_dice_label
-    playmat_photo_opponent = None  # プレイマット画像の参照を保持
-
-    # キャンバスを作成
-    opponent_canvas = tk.Canvas(opponent_window, width=960, height=720, bg="white")  # キャンバスを作成
-    opponent_canvas.pack()  # キャンバスをウィンドウに配置
-
-    opponent_dice_label = tk.Label(opponent_window, text="", font=("YuGothB.ttc", 24), bg="white")
-
-    # 対戦者用ビューを描画する関数
-    def draw_opponent_view():
-        # プレイマット画像の読み込みと描画
-        opponent_canvas.delete("all")  # キャンバスをクリア
-        global playmat_photo_opponent  # グローバル変数を宣言
-        if playmat_path:
-            if os.path.exists(playmat_path):  # 画像ファイルが存在するか確認
-                playmat_image = Image.open(playmat_path).resize((960, 720))  # 画像を開き、リサイズ
-                playmat_image = playmat_image.transpose(Image.FLIP_TOP_BOTTOM).transpose(Image.FLIP_LEFT_RIGHT)  # 画像を反転
-                playmat_photo_opponent = ImageTk.PhotoImage(playmat_image)  # PhotoImageに変換
-                opponent_canvas.create_image(0, 0, image=playmat_photo_opponent, anchor="nw")  # プレイマット画像を描画
-#            else:
-#        else:
-        if playmat_photo_opponent:  # プレイマット画像がある場合、それを背景として描画
-            opponent_canvas.create_image(0, 0, image=playmat_photo_opponent, anchor="nw")
-        for card in on_board:  # ボード上のカードをすべて描画
-            # カードの座標を反転（相手側から見た座標）
-            x, y = 960 - (card.get("x", 0) + card.get("width", 0)), 720 - (card.get("y", 0) + card.get("height", 0))
-            if card.get("y", 0) > 440:  # y座標が440より下の場合、裏向きにする
-                if card.get("rotated") and reverse_rotated_image:
-                    # 横向きで裏向きの画像を生成して描画
-                    reversed_image = reverse_rotated_image.transpose(Image.FLIP_TOP_BOTTOM).transpose(Image.FLIP_LEFT_RIGHT)
-                    reversed_photo = ImageTk.PhotoImage(reversed_image)
-                    opponent_canvas.create_image(x, y, image=reversed_photo, anchor="nw")
-                    card["opponent_image"] = reversed_photo  # 画像参照を保持
-                elif reverse_image:
-                    # 通常の裏向き画像を生成して描画
-                    reversed_image = reverse_image.transpose(Image.FLIP_TOP_BOTTOM).transpose(Image.FLIP_LEFT_RIGHT)
-                    reversed_photo = ImageTk.PhotoImage(reversed_image)
-                    opponent_canvas.create_image(x, y, image=reversed_photo, anchor="nw")
-                    card["opponent_image"] = reversed_photo  # 画像参照を保持
-            else:
-                # メインウインドウと同じ表裏状態で描画
-                if card.get("face_up", True):  # 表向きの場合
-                    if card.get("rotated") and card.get("original_image"):
-                        # 横向きの画像を生成して描画
-                        rotated_image = card["original_image"].rotate(90, expand=True).resize((111, 78))
-                        rotated_photo = ImageTk.PhotoImage(rotated_image.transpose(Image.FLIP_TOP_BOTTOM).transpose(Image.FLIP_LEFT_RIGHT))
-                        opponent_canvas.create_image(x, y, image=rotated_photo, anchor="nw")
-                        card["opponent_image"] = rotated_photo
-                    elif card.get("original_image"):
-                        # 通常の画像を生成して描画
-                        normal_image = card["original_image"].resize((78, 111))
-                        normal_photo = ImageTk.PhotoImage(normal_image.transpose(Image.FLIP_TOP_BOTTOM).transpose(Image.FLIP_LEFT_RIGHT))
-                        opponent_canvas.create_image(x, y, image=normal_photo, anchor="nw")
-                        card["opponent_image"] = normal_photo
-                else:  # 裏向きの場合
-                    if card.get("rotated") and reverse_rotated_photo_image:
-                        # 横向きの裏向き画像を描画
-                        reversed_image = reverse_rotated_image.transpose(Image.FLIP_TOP_BOTTOM).transpose(Image.FLIP_LEFT_RIGHT)
-                        reversed_photo = ImageTk.PhotoImage(reversed_image)
-                        opponent_canvas.create_image(x, y, image=reversed_photo, anchor="nw")
-                        card["opponent_image"] = reversed_photo
-                    elif reverse_photo_image:
-                        # 通常の裏向き画像を描画
-                        reversed_image = reverse_image.transpose(Image.FLIP_TOP_BOTTOM).transpose(Image.FLIP_LEFT_RIGHT)
-                        reversed_photo = ImageTk.PhotoImage(reversed_image)
-                        opponent_canvas.create_image(x, y, image=reversed_photo, anchor="nw")
-                        card["opponent_image"] = reversed_photo
-        # マーカーの描画
-        # Pillow用の背景画像を作成
-        opponent_canvas_width = opponent_canvas.winfo_width()
-        opponent_canvas_height = opponent_canvas.winfo_height()
-        opponent_background = Image.new("RGBA", (opponent_canvas_width, opponent_canvas_height), (255, 255, 255, 0))
-
-        draw = ImageDraw.Draw(opponent_background)
-
-        for marker in markers:
-            x, y = 960 - (marker["x"] + marker["width"]), 720 - (marker["y"] + marker["height"])
-            w, h = marker["width"], marker["height"]
-
-            # マーカーの背景を描画
-            translucent_color = (128, 128, 128, 128)  # 灰色の半透明
-            draw.rectangle([x, y, x + w, y + h], fill=translucent_color)
-
-            # マーカーのテキストを描画
-            outline_width = 2
-            if marker["text"]:
-                draw_text_with_outline(draw, (x, y), marker["text"],
-                                       font=ImageFont.truetype("YuGothB.ttc", 14),
-                                       text_color="black", outline_color="white",
-                                       outline_width=outline_width,
-                                       marker_width=w,  # キーワード引数
-                                       marker_height=h,  # キーワード引数
-                                       text_width=marker["text_width"], text_height=marker["text_height"]
-                                       )
-
-        # Pillow画像をTkinterキャンバスに表示
-        opponent_background_photo = ImageTk.PhotoImage(opponent_background)
-        opponent_canvas.create_image(0, 0, image=opponent_background_photo, anchor="nw")
-        opponent_canvas.photo_image = opponent_background_photo  # 参照を保持してガベージコレクションを防ぐ
-
-        # ライフポイントを描画
-        try:
-            font = ImageFont.truetype("YuGothB.ttc", 20)
-        except IOError:
-            font = ImageFont.load_default()
-
-        try:
-            life_points_value = life_points.get()
-        except tk.TclError:
-            life_points_value = 0  # デフォルト値を設定
-
-        text = f"LP: {life_points.get()}"
-        draw_text_with_outline(draw, (opponent_canvas_width - 100, 20), text, font, "Black", "White", 1, 40, 20, 40, 20)
-        text = f"Deck: {len(deck)}"
-        draw_text_with_outline(draw, (opponent_canvas_width - 100, 55), text, font, "Black", "White", 1, 40, 20, 40, 20)
-
-        # Pillow画像をTkinterキャンバスに描画
-        opponent_background_photo = ImageTk.PhotoImage(opponent_background)
-        opponent_canvas.create_image(0, 0, image=opponent_background_photo, anchor="nw")
-        opponent_canvas.photo_image = opponent_background_photo  # 参照を保持してガベージコレクションを防ぐ
-
-    # ビューを定期的に更新
-    def refresh_opponent_view():
-        draw_opponent_view()  # ビューを描画
-        opponent_window.after(opponent_refresh_rate, refresh_opponent_view)  #再描画
-
-    refresh_opponent_view()  # 最初の更新を実行
-
-def open_info_window():
-    global info_window
-    if info_window is not None and tk.Toplevel.winfo_exists(info_window):
-        return
-    info_window = tk.Toplevel(root)
-    info_window.title("カード情報ウインドウ")
-    info_window.geometry("400x600")
-
-    # サイズ変更を無効化
-    info_window.resizable(False, False)
-
-    def disable_close():
-        pass  # 何もしないことで閉じる操作を無効化
-    info_window.protocol("WM_DELETE_WINDOW", disable_close)
-
-    # カード情報ウィンドウをメインウィンドウの右に配置
-    x = root.winfo_x() + root.winfo_width()
-    y = root.winfo_y()
-    info_window.geometry(f"400x600+{x}+{y}")
-
-    update_info_display()
-
-def delete_card(event=None):
-    global selected_card
-    if selected_card:
-        if selected_card in on_board:
-            on_board.remove(selected_card)
-        elif selected_card in markers:
-            markers.remove(selected_card)
-#        else:
-#            messagebox.showinfo("エラー", "選択されたオブジェクトが見つかりません！")
-        selected_card = None
-        draw_cards()
-#    else:
-#        messagebox.showinfo("エラー", "削除するオブジェクトが選択されていません！")
+    def _on_canvas_click(self, event):
+        self.root.focus_set() 
+        self._dice_label_forget()
         
-def center_window(parent, window, width, height):
-    x = parent.winfo_x() + (parent.winfo_width() // 2) - (width // 2)
-    y = parent.winfo_y() + (parent.winfo_height() // 2) - (height // 2)
-    window.geometry(f"{width}x{height}+{x}+{y}")
-    
-def gacha_deck_making():
+        self.selected_card = None 
+        for marker in reversed(self.markers): 
+            if marker["x"] <= event.x < marker["x"] + marker["width"] and \
+               marker["y"] <= event.y < marker["y"] + marker["height"]:
+                self.selected_card = marker
+                self.is_dragging = True
+                self.drag_offset_x = event.x - marker["x"]
+                self.drag_offset_y = event.y - marker["y"]
+                self.draw_cards()
+                return 
 
-    def load_card_list():
-        card_mapping = {}
+        for card_data in reversed(self.on_board): 
+            if card_data["x"] <= event.x < card_data["x"] + card_data["width"] and \
+               card_data["y"] <= event.y < card_data["y"] + card_data["height"]:
+                self.selected_card = card_data
+                self.is_dragging = True
+                self.drag_offset_x = event.x - card_data["x"]
+                self.drag_offset_y = event.y - card_data["y"]
+                self.draw_cards()
+                return 
+        
+        self.is_dragging = False
+        self.draw_cards() 
+
+    def _on_canvas_drag(self, event):
+        if self.selected_card and self.is_dragging:
+            new_x = event.x - self.drag_offset_x
+            new_y = event.y - self.drag_offset_y
+            
+            self.selected_card["x"] = new_x
+            self.selected_card["y"] = new_y
+            self.draw_cards()
+
+    def _on_canvas_release(self, event):
+        self.is_dragging = False
+        if self.selected_card: 
+            w, h = self.selected_card["width"], self.selected_card["height"]
+            self.selected_card["x"] = max(0, min(self.selected_card["x"], self.canvas.winfo_width() - w))
+            self.selected_card["y"] = max(0, min(self.selected_card["y"], self.canvas.winfo_height() - h))
+        self.draw_cards() 
+
+    def _on_canvas_right_click(self, event):
+        self.root.focus_set()
+        self._dice_label_forget()
+        clicked_on_card = None
+        for card_data in reversed(self.on_board):
+            if card_data["x"] <= event.x < card_data["x"] + card_data["width"] and \
+               card_data["y"] <= event.y < card_data["y"] + card_data["height"]:
+                clicked_on_card = card_data
+                break
+        
+        if clicked_on_card:
+            if self.selected_card != clicked_on_card:
+                self.selected_card = clicked_on_card
+            
+            cx = self.selected_card["x"] + self.selected_card["width"] / 2
+            cy = self.selected_card["y"] + self.selected_card["height"] / 2
+            
+            self.selected_card["rotated"] = not self.selected_card["rotated"]
+            
+            if self.selected_card["rotated"]:
+                self.selected_card["width"], self.selected_card["height"] = 111, 78
+            else:
+                self.selected_card["width"], self.selected_card["height"] = 78, 111
+
+            self.selected_card["x"] = int(cx - self.selected_card["width"] / 2)
+            self.selected_card["y"] = int(cy - self.selected_card["height"] / 2)
+
+            self.draw_cards()
+
+    def _on_canvas_double_click(self, event):
+        if self.selected_card and self.selected_card.get("type") == "marker":
+            self.open_marker_edit_window()
+
+    def _on_delete_key(self, event=None):
+        if self.selected_card:
+            if self.selected_card in self.on_board:
+                self.on_board.remove(self.selected_card)
+            elif self.selected_card in self.markers:
+                self.markers.remove(self.selected_card)
+            self.selected_card = None
+            self.draw_cards()
+
+    def reverse_card(self):
+        if not self.selected_card or self.selected_card.get("type") == "marker":
+            messagebox.showinfo("エラー", "リバースするカードを選択してください！")
+            return
+        self.selected_card["face_up"] = not self.selected_card["face_up"]
+        if self.selected_card["face_up"]:
+            self.selected_card["revealed"] = True
+        self.draw_cards()
+
+    def bring_to_front(self):
+        if not self.selected_card: return
+        if self.selected_card in self.on_board:
+            self.on_board.remove(self.selected_card)
+            self.on_board.append(self.selected_card)
+        elif self.selected_card in self.markers: 
+            self.markers.remove(self.selected_card)
+            self.markers.append(self.selected_card)
+        self.draw_cards()
+
+    def send_to_back(self):
+        if not self.selected_card: return
+        if self.selected_card in self.on_board:
+            self.on_board.remove(self.selected_card)
+            self.on_board.insert(0, self.selected_card)
+        elif self.selected_card in self.markers:
+            self.markers.remove(self.selected_card)
+            self.markers.insert(0, self.selected_card)
+        self.draw_cards()
+
+    def move_to_deck_top(self):
+        if not self.selected_card or self.selected_card.get("type") == "marker":
+            return
+        if self.selected_card in self.on_board:
+            card_to_move = self.selected_card
+            self.on_board.remove(card_to_move)
+            card_to_move["face_up"] = True 
+            card_to_move["rotated"] = False
+            card_to_move["revealed"] = True 
+            self.deck.insert(0, card_to_move)
+            self.selected_card = None
+            self.draw_cards()
+
+    def move_to_deck_bottom(self):
+        if not self.selected_card or self.selected_card.get("type") == "marker":
+            return
+        if self.selected_card in self.on_board:
+            card_to_move = self.selected_card
+            self.on_board.remove(card_to_move)
+            card_to_move["face_up"] = True 
+            card_to_move["rotated"] = False
+            card_to_move["revealed"] = True
+            self.deck.append(card_to_move)
+            self.selected_card = None
+            self.draw_cards()
+
+    def unrotate_all(self):
+        for card_data in self.on_board:
+            if card_data.get("rotated"):
+                cx = card_data["x"] + card_data["width"] / 2
+                cy = card_data["y"] + card_data["height"] / 2
+                card_data["rotated"] = False
+                card_data["width"], card_data["height"] = 78, 111 
+                card_data["x"] = int(cx - card_data["width"] / 2)
+                card_data["y"] = int(cy - card_data["height"] / 2)
+        self.draw_cards()
+
+    def draw_from_deck(self, face_up=True, x=600, y=500):
+        if not self.deck:
+            messagebox.showinfo("デッキ", "デッキにカードがありません！")
+            return
+        card_data = self.deck.pop(0)
+        card_data["x"] = x
+        card_data["y"] = y
+        card_data["rotated"] = False
+        card_data["face_up"] = face_up
+        card_data["revealed"] = face_up
+        
+        self._adjust_card_position(card_data)
+        self.on_board.append(card_data)
+        self.selected_card = card_data
+        self.draw_cards()
+
+
+    def gacha_deck_making(self):
+        card_mapping_ex_val = {} 
+        # MODIFIED: Load CardList.csv from script's directory (root)
+        card_list_path = "CardList.csv" 
+
         try:
-            with open("CardList.txt", "r", encoding="utf-8") as f:
+            with open(card_list_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:
-                        card_id, display_name, card_ex = line.split(",", 2)
-                        card_mapping[card_id] = card_ex
+                        parts = line.split(",", 2)
+                        if len(parts) == 3:
+                            card_id, _, card_ex_val = parts
+                            card_mapping_ex_val[card_id] = card_ex_val
+                        else:
+                            print(f"Skipping malformed line in {card_list_path}: {line}")
+
         except FileNotFoundError:
-            messagebox.showerror("エラー", "CardList.txtが見つかりません！")
-        return card_mapping
+            messagebox.showerror("エラー", f"{card_list_path}が見つかりません！")
+            return
+        if not card_mapping_ex_val:
+            messagebox.showerror("エラー", f"{card_list_path}が空または不正な形式です。")
+            return
 
-    # カードリストをロード
-    card_mapping = load_card_list()
+        card_ids_in_list = list(card_mapping_ex_val.keys())
+        if not card_ids_in_list:
+            messagebox.showerror("エラー", f"{card_list_path}から読み込めるカードがありません。")
+            return
 
-    if not card_mapping:
-        messagebox.showerror("エラー", "カードリストが空です。処理を終了します。")
-        return
+        gacha_selected_cards = []
+        for _ in range(100):
+            chosen_card_id = random.choice(card_ids_in_list)
+            while int(card_mapping_ex_val.get(chosen_card_id, "0")) >= 2: 
+                chosen_card_id = random.choice(card_ids_in_list)
+            gacha_selected_cards.append(chosen_card_id)
 
-    # カードIDをリスト化
-    card_ids = list(card_mapping.keys())
+        ex_0 = sorted([cid for cid in gacha_selected_cards if card_mapping_ex_val.get(cid) == "0"])
+        ex_1 = sorted([cid for cid in gacha_selected_cards if card_mapping_ex_val.get(cid) == "1"])
 
-    # 100回分の抽選を実施
-    gacha_selected_cards = [random.choice(card_ids) for _ in range(100)]
-
-    # EX値が2以上のカードを再抽選
-    for i, card_id in enumerate(gacha_selected_cards):
-        while int(card_mapping[card_id]) >= 2:
-            card_id = random.choice(card_ids)  # 再抽選
-            gacha_selected_cards[i] = card_id
-
-    # EX値でカードを分類
-    ex_0 = [card_id for card_id in gacha_selected_cards if card_mapping[card_id] == "0"]
-    ex_1 = [card_id for card_id in gacha_selected_cards if card_mapping[card_id] == "1"]
-
-    # ID順にソート
-    ex_0_sorted = sorted(ex_0)  # ID順にソート
-    ex_1_sorted = sorted(ex_1)
-
-    # テキストファイルを生成
-    output_filename = f"gacha_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
-    try:
-        with open(output_filename, "w", encoding="utf-8") as f:
-            # EXが0のデータをID順に追記
-            for card_id in ex_0_sorted:
-                f.write(f"{card_id}\n")
-
-            # [EX]を追記
-            f.write("[EX]\n")
-
-            # EXが1のデータをID順に追記
-            for card_id in ex_1_sorted:
-                f.write(f"{card_id}\n")
-
-            # [Resource]と画像ファイル名を追記
-            f.write("[Resource]\n")
-            f.write("reverse.png\n")
-            f.write("playmat.png\n")
-
-        messagebox.showinfo("成功", f"{output_filename} に正常にデッキが出力されました。")
-    except Exception as e:
-        messagebox.showerror("エラー", f"ファイルの書き込み中に問題が発生しました: {e}")
+        # Gacha deck output still goes to 'deck' folder
+        deck_folder = "deck"
+        if not os.path.exists(deck_folder):
+            try:
+                os.makedirs(deck_folder) 
+            except OSError as e:
+                messagebox.showerror("エラー", f"{deck_folder}フォルダの作成に失敗しました: {e}")
+                return
         
-def dice_label_forget():
-    dice_label.place_forget()  # ラベルを非表示にする
-    opponent_dice_label.place_forget()  # ラベルを非表示にする
-    
-def roll_dice():
-    global selected_card
-    selected_card = None
-    draw_cards()
-    if dice_label.winfo_ismapped():
-        dice_label_forget()  # ラベルを非表示にする
-    else:
-        result = random.randint(1, 6)
-        display_dice_result(result)
+        output_filename_base = f"gacha_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
+        output_filename = os.path.join(deck_folder, output_filename_base)
+        
+        try:
+            with open(output_filename, "w", encoding="utf-8") as f:
+                for card_id in ex_0: f.write(f"{card_id}\n")
+                f.write("[EX]\n")
+                for card_id in ex_1: f.write(f"{card_id}\n")
+                f.write("[Resource]\nreverse.png\nplaymat.png\n")
+            messagebox.showinfo("成功", f"{output_filename} に正常にデッキが出力されました。")
+        except Exception as e:
+            messagebox.showerror("エラー", f"ファイルの書き込み中に問題が発生しました: {e}")
 
-def display_dice_result(result):
-    """中央に結果を表示し、アニメーション的に文字列を更新する"""
-    def update_text_dice(index):
-        if index < len(messages):
-            dice_label.config(text=messages[index])
-            opponent_dice_label.config(text=messages[index])
-            root.after(100, update_text_dice, index + 1)
+
+    def _dice_label_forget(self):
+        self.dice_label.place_forget()
+        if self.opponent_window_instance and self.opponent_window_instance.is_active():
+            self.opponent_window_instance.hide_dice_result()
+
+    def roll_dice(self):
+        self.selected_card = None 
+        self.draw_cards() 
+        if self.dice_label.winfo_ismapped():
+            self._dice_label_forget()
         else:
-            dice_label.config(text=f"1D6... {result}")
-            opponent_dice_label.config(text=f"1D6... {result}")
-
-    messages = ["1D6", "1D6.", "1D6..", "1D6..."]
-    dice_label.place(relx=0.5, rely=0.5, anchor="center")
-    opponent_dice_label.place(relx=0.5, rely=0.5, anchor="center")
-    update_text_dice(0)
-    
-def coin_toss():
-    global selected_card
-    selected_card = None
-    draw_cards()
-    if dice_label.winfo_ismapped():
-        dice_label_forget()  # ラベルを非表示にする
-    else:
-        result = random.randint(1, 2)
-        if result == 1:
-            result = "表"
+            result = random.randint(1, 6)
+            self._display_animated_result(result, "1D6", "1D6...")
+            
+    def coin_toss(self):
+        self.selected_card = None 
+        self.draw_cards() 
+        if self.dice_label.winfo_ismapped():
+            self._dice_label_forget()
         else:
-            result = "裏"
-        display_coin_result(result)
+            result_val = random.randint(1, 2)
+            result_text = "表" if result_val == 1 else "裏"
+            self._display_animated_result(result_text, "コイントス", "コイントス...")
 
-def display_coin_result(result):
-    """中央に結果を表示し、アニメーション的に文字列を更新する"""
-    def update_text_coin(index):
-        if index < len(messages):
-            dice_label.config(text=messages[index])
-            opponent_dice_label.config(text=messages[index])
-            root.after(100, update_text_coin, index + 1)
+    def _display_animated_result(self, final_result, base_message, animated_message_stem):
+        messages = [animated_message_stem[0:i] for i in range(len(base_message), len(animated_message_stem) +1 )]
+        
+        self.dice_label.place(relx=0.5, rely=0.5, anchor="center")
+        if self.opponent_window_instance and self.opponent_window_instance.is_active():
+             self.opponent_window_instance.show_dice_result("") 
+
+        def update_text(index):
+            if index < len(messages):
+                current_text = messages[index]
+                self.dice_label.config(text=current_text)
+                if self.opponent_window_instance and self.opponent_window_instance.is_active():
+                    self.opponent_window_instance.update_dice_text(current_text)
+                self.root.after(100, update_text, index + 1)
+            else:
+                final_text_display = f"{animated_message_stem} {final_result}"
+                self.dice_label.config(text=final_text_display)
+                if self.opponent_window_instance and self.opponent_window_instance.is_active():
+                    self.opponent_window_instance.update_dice_text(final_text_display)
+
+        update_text(0)
+
+    def save_board(self):
+        # MODIFIED: Save board files to 'save' folder
+        save_folder = "save"
+        if not os.path.exists(save_folder):
+            try:
+                os.makedirs(save_folder)
+                print(f"Created directory: {save_folder}")
+            except OSError as e:
+                messagebox.showerror("エラー", f"{save_folder}フォルダの作成に失敗しました: {e}")
+                return
+
+        output_filename_base = f"save_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
+        output_filename = os.path.join(save_folder, output_filename_base) 
+        try:
+            with open(output_filename, "w", encoding="utf-8") as file:
+                file.write("[Resource]\n")
+                reverse_rel_path = os.path.basename(self.reverse_image_path) if self.reverse_image_path else "reverse.png"
+                playmat_rel_path = os.path.basename(self.playmat_path) if self.playmat_path else "playmat.png"
+                file.write(f"{reverse_rel_path}\n")
+                file.write(f"{playmat_rel_path}\n")
+
+                file.write("[Deck]\n")
+                for card_data in self.deck: file.write(f"{card_data['id']}\n")
+
+                file.write("[Board]\n")
+                for card_data in self.on_board:
+                    if card_data.get("type") == "marker": continue 
+                    file.write(
+                        f"{card_data['id']},{card_data['x']},{card_data['y']},"
+                        f"{int(card_data['rotated'])},{int(card_data['face_up'])},{int(card_data['revealed'])}\n"
+                    )
+                
+                file.write("[Markers]\n")
+                for marker in self.markers:
+                    text_escaped = marker['text'].replace('\n', '\\n')
+                    file.write(
+                        f"{text_escaped},{marker['x']},{marker['y']},"
+                        f"{marker['width']},{marker['height']}\n"
+                    )
+            messagebox.showinfo("成功", f"盤面を保存しました！\nファイル名: {output_filename}")
+        except Exception as e:
+            messagebox.showerror("エラー", f"保存中にエラーが発生しました:\n{e}")
+
+    def load_board(self):
+        # MODIFIED: Set initial directory for loading board saves to 'save' folder
+        base_path = os.path.dirname(sys.argv[0]) if getattr(sys, 'frozen', False) else os.getcwd()
+        save_folder_path = os.path.join(base_path, "save")
+        if not os.path.exists(save_folder_path):
+            try:
+                os.makedirs(save_folder_path)
+                print(f"Created directory: {save_folder_path}")
+            except OSError as e:
+                print(f"Warning: Could not create {save_folder_path} for initialdir: {e}")
+        
+        file_path = filedialog.askopenfilename(
+            filetypes=[("テキストファイル", "*.txt"), ("すべてのファイル", "*.*")],
+            title="盤面の読み込み",
+            initialdir=save_folder_path 
+        )
+        if not file_path: return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                lines = [line.strip() for line in file]
+
+            self.deck, self.on_board, self.markers = [], [], []
+            self.ex_deck = [] 
+            self.selected_card = None
+
+            section = None
+            resource_lines_from_file = []
+
+            for line_content in lines:
+                if not line_content: continue
+                if line_content == "[Resource]": section = "resource"; resource_lines_from_file = []; continue
+                elif line_content == "[Deck]": section = "deck"; continue
+                elif line_content == "[Board]": section = "board"; continue
+                elif line_content == "[Markers]": section = "markers"; continue
+
+                if section == "resource":
+                    resource_lines_from_file.append(line_content)
+                elif section == "deck":
+                    self.deck.append(self._create_card_dict(line_content))
+                elif section == "board":
+                    parts = line_content.split(",")
+                    if len(parts) == 6:
+                        card_id, x, y, rotated, face_up, revealed = parts
+                        self.on_board.append(self._create_card_dict(
+                            card_id, int(x), int(y), bool(int(rotated)),
+                            bool(int(face_up)), bool(int(revealed))
+                        ))
+                elif section == "markers":
+                    parts = line_content.split(",", 4) 
+                    if len(parts) == 5:
+                        text, x, y, width, height = parts
+                        self.markers.append({
+                            "type": "marker", "text": text.replace('\\n', '\n'),
+                            "x": int(x), "y": int(y),
+                            "width": int(width), "height": int(height),
+                            "selected": False, "text_width":0, "text_height":0
+                        })
+            
+            if len(resource_lines_from_file) >= 1:
+                 new_rev_path = os.path.join("resource", resource_lines_from_file[0])
+                 if new_rev_path != self.reverse_image_path or not self.reverse_image_pil:
+                    self.reverse_image_path = new_rev_path
+                    try:
+                        self.reverse_image_pil = Image.open(self.reverse_image_path).resize((78, 111))
+                        self.reverse_photo_image = ImageTk.PhotoImage(self.reverse_image_pil)
+                        self.reverse_rotated_image_pil = self.reverse_image_pil.rotate(90, expand=True).resize((111, 78))
+                        self.reverse_rotated_photo_image = ImageTk.PhotoImage(self.reverse_rotated_image_pil)
+                    except FileNotFoundError: print(f"Loaded board reverse image not found: {self.reverse_image_path}")
+
+
+            if len(resource_lines_from_file) >= 2:
+                new_pm_path = os.path.join("resource", resource_lines_from_file[1])
+                if new_pm_path != self.playmat_path or not self.playmat_image_pil:
+                    self.playmat_path = new_pm_path
+                    try:
+                        self.playmat_image_pil = Image.open(self.playmat_path).resize((960, 720))
+                        self.playmat_photo = ImageTk.PhotoImage(self.playmat_image_pil)
+                    except FileNotFoundError: print(f"Loaded board playmat image not found: {self.playmat_path}")
+
+
+            self.draw_cards()
+            messagebox.showinfo("成功", "盤面を読み込みました！")
+        except Exception as e:
+            messagebox.showerror("エラー", f"読み込み中にエラーが発生しました:\n{e}")
+
+
+    def _copy_card_id_to_clipboard(self, event=None):
+        if self.selected_card and "id" in self.selected_card: 
+            card_id = self.selected_card["id"]
+            self.root.clipboard_clear()
+            self.root.clipboard_append(card_id)
+            self.root.update() 
+
+    def restart_app(self):
+        try:
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
+        except Exception as e:
+            messagebox.showerror("再起動エラー", f"再起動に失敗しました: {e}")
+
+    def update_deck_count_display(self):
+        if hasattr(self, 'deck_count_label') and self.deck_count_label.winfo_exists():
+            self.deck_count_label.config(text=f"デッキ: {len(self.deck)}枚")
+
+    # --- Window Openers ---
+    def open_info_window(self):
+        if self.info_window_instance is None or not self.info_window_instance.is_active():
+            self.info_window_instance = InfoWindow(self)
         else:
-            dice_label.config(text=f"コイントス... {result}")
-            opponent_dice_label.config(text=f"コイントス... {result}")
+            self.info_window_instance.lift_window()
 
-    messages = ["コイントス", "コイントス.", "コイントス..", "コイントス..."]
-    dice_label.place(relx=0.5, rely=0.5, anchor="center")
-    opponent_dice_label.place(relx=0.5, rely=0.5, anchor="center")
-    update_text_coin(0)
-    
-# ラベルの作成（結果表示用）
-dice_label = tk.Label(root, text="", font=("YuGothB.ttc", 24), bg="white")
 
-def save_board():
-    from datetime import datetime
-    output_filename = f"save_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"  # 自動生成ファイル名
-
-    try:
-        with open(output_filename, "w", encoding="utf-8") as file:
-            # リソース情報の保存
-            file.write("[Resource]\n")
-
-            # reverse_image_path を相対パスで保存
-            reverse_relative_path = os.path.relpath(reverse_image_path, "resource") if reverse_image_path else "reverse.png"
-            file.write(f"{reverse_relative_path}\n")
-
-            # playmat_path を相対パスで保存
-            playmat_relative_path = os.path.relpath(playmat_path, "resource") if playmat_path else "playmat.png"
-            file.write(f"{playmat_relative_path}\n")
-
-            # デッキ情報の保存
-            file.write("[Deck]\n")
-            for card in deck:
-                file.write(f"{card['id']}\n")
-
-            # ボード上のカード情報の保存
-            file.write("[Board]\n")
-            for card in on_board:
-                file.write(
-                    f"{card['id']},{card['x']},{card['y']},{int(card['rotated'])},{int(card['face_up'])},{int(card['revealed'])}\n"
-                )
-
-            # マーカー情報の保存
-            file.write("[Markers]\n")
-            for marker in markers:
-                file.write(
-                    f"{marker['text'].replace('\n', '\\n')},{marker['x']},{marker['y']},{marker['width']},{marker['height']}\n"
-                )
-
-        messagebox.showinfo("成功", f"盤面を保存しました！\nファイル名: {output_filename}")
-    except Exception as e:
-        messagebox.showerror("エラー", f"保存中にエラーが発生しました:\n{e}")
-
-def load_board():
-    global deck, on_board, markers
-    global reverse_image_path, playmat_path, reverse_image, reverse_photo_image, reverse_rotated_image, reverse_rotated_photo_image, playmat_image, playmat_photo
-
-    file_path = filedialog.askopenfilename(
-        filetypes=[("テキストファイル", "*.txt"), ("すべてのファイル", "*.*")],
-        title="盤面の読み込み"
-    )
-    if not file_path:
-        return
-
-    try:
-        with open(file_path, "r", encoding="utf-8") as file:
-            lines = file.readlines()
-
-        # 初期化
-        deck = []
-        on_board = []
-        markers = []
-
-        section = None
-        resource_lines = []
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue  # 空白行をスキップ
-
-            if line == "[Resource]":
-                section = "resource"
-                resource_lines = []  # リソースセクションの内容を初期化
-                continue
-            elif line == "[Deck]":
-                section = "deck"
-                continue
-            elif line == "[Board]":
-                section = "board"
-                continue
-            elif line == "[Markers]":
-                section = "markers"
-                continue
-
-            # セクションごとの処理
-            if section == "resource":
-                resource_lines.append(line)  # リソースセクションの内容を収集
-            elif section == "deck":
-                deck.append({"id": line, "width": 78, "height": 111, "rotated": False, "face_up": True, "revealed": True, "image": None, "original_image": None})
-            elif section == "board":
-                card_id, x, y, rotated, face_up, revealed = line.split(",")
-                on_board.append({
-                    "id": card_id,
-                    "x": int(x),
-                    "y": int(y),
-                    "rotated": bool(int(rotated)),
-                    "face_up": bool(int(face_up)),
-                    "revealed": bool(int(revealed)),
-                    "width": 78 if not bool(int(rotated)) else 111,
-                    "height": 111 if not bool(int(rotated)) else 78,
-                    "image": None,
-                    "original_image": None
-                })
-            elif section == "markers":
-                text, x, y, width, height = line.split(",")
-                markers.append({
-                    "type": "marker",
-                    "text": text.replace('\\n', '\n'),
-                    "x": int(x),
-                    "y": int(y),
-                    "width": int(width),
-                    "height": int(height),
-                    "selected": False
-                })
-
-        # リソース画像の設定
-        if len(resource_lines) >= 1:
-            reverse_image_path = os.path.join("resource", resource_lines[0])
+    def open_opponent_window(self):
+        if self.opponent_window_instance is None or not self.opponent_window_instance.is_active():
+            self.opponent_window_instance = OpponentWindow(self)
         else:
-            reverse_image_path = os.path.join("resource", "reverse.png")
+            self.opponent_window_instance.lift_window()
 
-        if len(resource_lines) >= 2:
-            playmat_path = os.path.join("resource", resource_lines[1])
+    def open_deck_contents_window(self):
+        if self.deck_contents_window_instance is None or not self.deck_contents_window_instance.is_active():
+            self.deck_contents_window_instance = DeckContentsWindow(self)
         else:
-            playmat_path = os.path.join("resource", "playmat.png")
+            self.deck_contents_window_instance.lift_window()
 
-        # リソース画像の読み込み
-        if os.path.exists(reverse_image_path):
-            reverse_image = Image.open(reverse_image_path).resize((78, 111))
-            reverse_photo_image = ImageTk.PhotoImage(reverse_image)
-            reverse_rotated_image = reverse_image.rotate(90, expand=True).resize((111, 78))
-            reverse_rotated_photo_image = ImageTk.PhotoImage(reverse_rotated_image)
+
+    def open_marker_edit_window(self):
+        if self.selected_card and self.selected_card.get("type") == "marker":
+            if self.marker_edit_window_instance is None or not self.marker_edit_window_instance.is_active():
+                self.marker_edit_window_instance = MarkerEditWindow(self, self.selected_card)
+            else:
+                 self.marker_edit_window_instance.lift_window() 
+
+
+class InfoWindow:
+    def __init__(self, app_ref):
+        self.app = app_ref
+        self.root = app_ref.root 
+        self.window = tk.Toplevel(self.root)
+        self.window.title("カード情報ウインドウ")
+        self.window.geometry("400x600")
+        self.window.resizable(False, False)
+        self.window.protocol("WM_DELETE_WINDOW", self._disable_close) 
+
+        self.root.update_idletasks()
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        self.window.geometry(f"400x600+{main_x + main_w}+{main_y}")
+        
+        self.image_label = tk.Label(self.window, bg="white") 
+        self.image_label.pack(expand=True, fill="both")
+        self.current_photo_image = None 
+
+        self.update_display()
+
+    def _disable_close(self):
+        pass 
+
+    def destroy_window(self): 
+        if self.window:
+            self.window.destroy()
+            self.window = None
+            self.app.info_window_instance = None
+
+
+    def lift_window(self):
+        if self.window and self.window.winfo_exists():
+            self.window.lift()
+
+    def is_active(self):
+        return self.window is not None and self.window.winfo_exists()
+
+    def update_display(self):
+        if not self.is_active(): return
+
+        display_photo = None
+        display_text = ""
+
+        if self.app.selected_card and "id" in self.app.selected_card: 
+            if not self.app.selected_card.get("revealed", False) and self.app.unknown_photo_image:
+                display_photo = self.app.unknown_photo_image
+            else:
+                image_path = os.path.join("card-img", f"{self.app.selected_card['id']}.png")
+                try:
+                    pil_img = Image.open(image_path).resize((390, 555))
+                    display_photo = ImageTk.PhotoImage(pil_img)
+                except FileNotFoundError:
+                    if self.app.noimage_large_photo_image:
+                         display_photo = self.app.noimage_large_photo_image
+                    else: 
+                         display_text = "画像が見つかりません"
+            if display_photo: self.app.last_displayed_image = display_photo
+
+
+        elif self.app.last_displayed_image: 
+            display_photo = self.app.last_displayed_image
+        elif self.app.unknown_photo_image: 
+             display_photo = self.app.unknown_photo_image 
         else:
-            reverse_image = None
-            reverse_photo_image = None
-            reverse_rotated_image = None
-            reverse_rotated_photo_image = None
+             display_text = "有効なカードが選択されていません"
 
-        if os.path.exists(playmat_path):
-            playmat_image = Image.open(playmat_path).resize((960, 720))
-            playmat_photo = ImageTk.PhotoImage(playmat_image)
 
-        # ボード上のカード画像を再設定
-        for card in deck + on_board:
-            image_path = os.path.join("card-img", f"{card['id']}.png")
-            if os.path.exists(image_path):
-                card_image = Image.open(image_path).resize((78, 111))
-                card["original_image"] = card_image
-                card["image"] = ImageTk.PhotoImage(card_image)
-            elif noimage_image:
-                card["original_image"] = noimage_image
-                card["image"] = noimage_photo_image
+        if display_photo:
+            self.image_label.config(image=display_photo, text="")
+            self.current_photo_image = display_photo 
+        else:
+            self.image_label.config(image="", text=display_text, fg="red")
+            self.current_photo_image = None
 
-        draw_cards()
-        update_deck_count_display()  # デッキ枚数表示を更新
-        messagebox.showinfo("成功", "盤面を読み込みました！")
-    except Exception as e:
-        messagebox.showerror("エラー", f"読み込み中にエラーが発生しました:\n{e}")
 
-# 選択中のカードIDをクリップボードにコピーする関数
-def copy_card_id_to_clipboard(event=None):
-    if selected_card and "id" in selected_card:
-        card_id = selected_card["id"]
-        root.clipboard_clear()  # クリップボードをクリア
-        root.clipboard_append(card_id)  # カードIDをクリップボードに追加
-        root.update()  # クリップボードの更新
-#        messagebox.showinfo("クリップボード", f"カードID '{card_id}' をクリップボードにコピーしました！")
-#    else:
-#        messagebox.showwarning("クリップボード", "選択中のカードがありません！")
+class OpponentWindow:
+    def __init__(self, app_ref):
+        self.app = app_ref
+        self.root = app_ref.root
+        self.window = tk.Toplevel(self.root)
+        self.window.title("対戦者用ウインドウ")
+        self.window.geometry("960x720")
+        self.window.resizable(False, False)
+        self.window.protocol("WM_DELETE_WINDOW", self._disable_close)
 
-# アプリを再起動する関数
-def restart_app():
-    python = sys.executable
-    os.execl(python, python, *sys.argv)  # 現在のPythonスクリプトを再実行
+        self.root.update_idletasks()
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        self.window.geometry(f"960x720+{main_x + 64}+{main_y + 64}")
+        self.window.lower()
+
+        self.canvas = tk.Canvas(self.window, width=960, height=720, bg="white")
+        self.canvas.pack()
+
+        self.dice_label = tk.Label(self.window, text="", font=("YuGothB.ttc", 24), bg="white")
+        
+        self.playmat_photo_opponent = None 
+        self.card_images_opponent = {} 
+        self.marker_layer_opponent_tk = None 
+
+        self.needs_redraw = True 
+        self._load_resources()
+        self._refresh_view_loop()
+
+
+    def _load_resources(self):
+        if self.app.playmat_image_pil:
+            try:
+                flipped_playmat_pil = self.app.playmat_image_pil.transpose(Image.FLIP_TOP_BOTTOM).transpose(Image.FLIP_LEFT_RIGHT)
+                self.playmat_photo_opponent = ImageTk.PhotoImage(flipped_playmat_pil)
+            except Exception as e:
+                print(f"Error creating opponent playmat: {e}")
+                self.playmat_photo_opponent = None 
+
+    def _disable_close(self):
+        pass
+
+    def destroy_window(self):
+        if self.window:
+            self.window.destroy()
+            self.window = None
+            self.app.opponent_window_instance = None
+
+
+    def lift_window(self):
+         if self.window and self.window.winfo_exists():
+            self.window.lift()
+            self.window.lower(self.root) 
+
+    def is_active(self):
+        return self.window is not None and self.window.winfo_exists()
+
+    def show_dice_result(self, text): 
+        if self.is_active():
+            self.dice_label.config(text=text)
+            self.dice_label.place(relx=0.5, rely=0.5, anchor="center")
     
+    def update_dice_text(self, text): 
+        if self.is_active():
+             self.dice_label.config(text=text)
 
-# イベントバインディング（クリックやドラッグ）
-canvas.bind("<Button-1>", select_card)
-canvas.bind("<B1-Motion>", move_card)
-canvas.bind("<ButtonRelease-1>", release_card)
-canvas.bind("<Button-3>", right_click)
-root.bind("<Delete>", delete_card)
-canvas.bind("<Double-1>", lambda event: edit_marker_text() if selected_card and selected_card.get("type") == "marker" else None)
-root.bind("<Control-t>", lambda event: move_to_deck_top())  # Ctrl+Tでデッキトップへ戻す
-root.bind("<Control-b>", lambda event: move_to_deck_bottom())  # Ctrl+Bでデッキボトムへ戻す
-root.bind("<Control-f>", lambda event: bring_to_front())  # Ctrl+Fで最前面に移動
-root.bind("<Control-r>", lambda event: send_to_back())  # Ctrl+Rで最背面に移動
-root.bind("<Control-c>", copy_card_id_to_clipboard)
+    def hide_dice_result(self):
+        if self.is_active():
+            self.dice_label.place_forget()
 
-life_points = tk.IntVar(value=0)  # 初期値は0
+    def _get_opponent_card_image(self, card_data, is_hidden_hand):
+        state_key = f"{card_data['id']}_{card_data.get('rotated',False)}_{card_data.get('face_up',True)}_{is_hidden_hand}"
 
-# ライフポイント入力が有効かどうかを検証する関数
-def validate_life_input(new_value):
-    if new_value == "":
-        return True
-    try:
-        val = int(new_value)
-        return 0 <= val <= 999999  # 0から999999まで（6桁）
-    except ValueError:
-        return False
+        if state_key in self.card_images_opponent:
+            return self.card_images_opponent[state_key]
 
-# ライフポイントの入力エラーを防ぐための設定
-validate_cmd = root.register(validate_life_input)
+        pil_image_to_transform = None
+        target_size = (111, 78) if card_data.get('rotated') else (78, 111)
 
-def setup_buttons():
-    global life_points, deck_count_label  # グローバル変数を使用
+        if is_hidden_hand:
+            pil_image_to_transform = self.app.reverse_rotated_image_pil if card_data.get('rotated') else self.app.reverse_image_pil
+        elif not card_data.get('face_up', True): 
+            pil_image_to_transform = self.app.reverse_rotated_image_pil if card_data.get('rotated') else self.app.reverse_image_pil
+        else: 
+            source_pil = card_data.get("original_image")
+            if source_pil: 
+                if card_data.get('rotated'):
+                    pil_image_to_transform = source_pil.rotate(90, expand=True).resize(target_size)
+                else:
+                    pil_image_to_transform = source_pil.resize(target_size)
+            elif self.app.noimage_pil: 
+                 pil_image_to_transform = self.app.noimage_pil.rotate(90, expand=True).resize(target_size) if card_data.get('rotated') else self.app.noimage_pil.resize(target_size)
 
-    # メインボタンフレーム
-    button_frame = tk.Frame(root)
-    button_frame.pack()
 
-    # 右下ボタン用フレーム
-    bottom_right_frame = tk.Frame(root)
-    bottom_right_frame.place(relx=1.0, rely=1.0, anchor="se")  # 右下に配置
+        if pil_image_to_transform:
+            try:
+                transformed_pil = pil_image_to_transform.transpose(Image.FLIP_TOP_BOTTOM).transpose(Image.FLIP_LEFT_RIGHT)
+                tk_image = ImageTk.PhotoImage(transformed_pil)
+                self.card_images_opponent[state_key] = tk_image 
+                return tk_image
+            except Exception as e:
+                print(f"Error transforming image for opponent: {card_data['id']} - {e}")
+        
+        return None 
 
-    # 左下ボタン用フレーム
-    bottom_left_frame = tk.Frame(root)
-    bottom_left_frame.place(relx=0.0, rely=1.0, anchor="sw")  # 左下に配置
+    def _draw_view(self):
+        if not self.is_active(): return
+        self.canvas.delete("all")
 
-    # ライフポイント入力ボックスを左下に追加
-    tk.Label(bottom_left_frame, text="ライフポイント:").pack(side="top", padx=5, pady=2)
+        if self.playmat_photo_opponent:
+            self.canvas.create_image(0, 0, image=self.playmat_photo_opponent, anchor="nw")
+        
+        for card_data in self.app.on_board:
+            original_x, original_y = card_data.get("x",0), card_data.get("y",0)
+            original_w, original_h = card_data.get("width",78), card_data.get("height",111)
 
-    life_spinbox = tk.Spinbox(
-        bottom_left_frame,
-        from_=0,
-        to=999999,
-        increment=1,
-        textvariable=life_points,
-        width=8,
-        validate="key",  # 入力時に検証
-        validatecommand=(validate_cmd, "%P")  # 入力内容を検証
-    )
-    life_spinbox.pack(side="top", padx=5, pady=2)
+            opp_x = 960 - (original_x + original_w)
+            opp_y = 720 - (original_y + original_h)
 
-    # デッキ枚数表示ラベルを左下に追加
-    deck_count_label = tk.Label(bottom_left_frame, text=f"デッキ: {len(deck)}枚", font=("Arial", 10))
-    deck_count_label.pack(side="top", padx=5, pady=2)
+            is_hidden_in_hand = original_y > 440 
+            
+            img_to_draw = self._get_opponent_card_image(card_data, is_hidden_in_hand)
 
-    # 左下ボタン用の横並びフレームを作成
-    gacha_button_frame = tk.Frame(bottom_left_frame)
-    gacha_button_frame.pack(side="top", padx=5, pady=2)
+            if img_to_draw:
+                self.canvas.create_image(opp_x, opp_y, image=img_to_draw, anchor="nw")
+        
+        if self.app.markers:
+            marker_layer_pil_opp = Image.new("RGBA", (self.canvas.winfo_width(), self.canvas.winfo_height()), (255, 255, 255, 0))
+            draw_pil_opp = ImageDraw.Draw(marker_layer_pil_opp)
+            
+            try:
+                font_opp = ImageFont.truetype("YuGothB.ttc", 14)
+            except IOError:
+                font_opp = ImageFont.load_default()
 
-    # 左下ボタンを横並びで配置
-    gacha_buttons = [
-        ("コイントス", coin_toss),
-        ("6面ダイス", roll_dice),
-    ]
-    for i, (text, command) in enumerate(gacha_buttons):
-        button = tk.Button(gacha_button_frame, text=text, command=command)
-        button.grid(row=0, column=i, padx=2, pady=2)  # 横並びに配置
+            for marker in self.app.markers:
+                ox, oy, ow, oh = marker["x"], marker["y"], marker["width"], marker["height"]
+                opp_marker_x = 960 - (ox + ow)
+                opp_marker_y = 720 - (oy + oh)
+
+                translucent_color_pil = (128, 128, 128, 128)
+                draw_pil_opp.rectangle([opp_marker_x, opp_marker_y, opp_marker_x + ow, opp_marker_y + oh], fill=translucent_color_pil)
+
+                if marker["text"]:
+                    draw_text_with_outline(draw_pil_opp, (opp_marker_x, opp_marker_y), marker["text"], font_opp,
+                                           "black", "white", 2,
+                                           ow, oh, marker["text_width"], marker["text_height"])
+            
+            self.marker_layer_opponent_tk = ImageTk.PhotoImage(marker_layer_pil_opp)
+            self.canvas.create_image(0,0, image=self.marker_layer_opponent_tk, anchor="nw")
+
+        lp_deck_info_pil = Image.new("RGBA", (self.canvas.winfo_width(), self.canvas.winfo_height()), (255,255,255,0))
+        draw_info_pil = ImageDraw.Draw(lp_deck_info_pil)
+        try:
+            font_info = ImageFont.truetype("YuGothB.ttc", 20)
+        except IOError:
+            font_info = ImageFont.load_default()
+        
+        lp_text = f"LP: {self.app.life_points.get()}"
+        deck_count_text = f"Deck: {len(self.app.deck)}"
+        
+        lp_text_w, lp_text_h = font_info.getsize(lp_text) if hasattr(font_info, "getsize") else (80, 20)
+        deck_text_w, deck_text_h = font_info.getsize(deck_count_text) if hasattr(font_info, "getsize") else (80, 20)
+
+        lp_x_opp = 10 
+        lp_y_opp = 20 
+        deck_x_opp = 10
+        deck_y_opp = lp_y_opp + lp_text_h + 5
+
+        dummy_box_w = max(lp_text_w, deck_text_w) + 20 
+        dummy_box_h = lp_text_h 
+
+        draw_text_with_outline(draw_info_pil, (lp_x_opp, lp_y_opp), lp_text, font_info, "Black", "White", 1, 
+                               dummy_box_w, dummy_box_h, lp_text_w, lp_text_h)
+        draw_text_with_outline(draw_info_pil, (deck_x_opp, deck_y_opp), deck_count_text, font_info, "Black", "White", 1,
+                               dummy_box_w, dummy_box_h, deck_text_w, deck_text_h)
+
+        self.lp_deck_info_tk = ImageTk.PhotoImage(lp_deck_info_pil)
+        self.canvas.create_image(0,0, image=self.lp_deck_info_tk, anchor="nw")
+
+
+        self.needs_redraw = False 
+
+
+    def _refresh_view_loop(self):
+        if self.is_active():
+            if self.needs_redraw: 
+                self._draw_view()
+            self.window.after(self.app.opponent_refresh_rate, self._refresh_view_loop)
+
+
+class DeckContentsWindow:
+    def __init__(self, app_ref):
+        self.app = app_ref
+        self.root = app_ref.root
+        self.window = tk.Toplevel(self.root)
+        self.window.title("デッキの中身を見る")
+        
+        self.window.geometry("800x660") 
+        center_tk_window(self.root, self.window, 800, 660)
+
+        self.window.protocol("WM_DELETE_WINDOW", self.destroy_window)
+
+        self.card_mapping = self._load_card_list_names() 
+        self.current_photo_image = None 
+
+        main_frame = tk.Frame(self.window)
+        main_frame.pack(fill="both", expand=True)
+
+        list_frame = tk.Frame(main_frame)
+        list_frame.pack(side="left", fill="y", padx=10, pady=10)
+
+        self.listbox = tk.Listbox(list_frame, width=50, height=30) 
+        self.listbox.pack(side="left", fill="y")
+        
+        scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=self.listbox.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        for card_data in self.app.deck:
+            display_name = self.card_mapping.get(card_data["id"], card_data["id"])
+            self.listbox.insert(tk.END, display_name)
+
+        self.listbox.bind("<<ListboxSelect>>", self._show_card_image)
+
+        image_display_frame = tk.Frame(main_frame, width=390, height=555, bg="white") 
+        image_display_frame.pack_propagate(False)
+        image_display_frame.pack(side="right", padx=10, pady=10, anchor="n")
+
+        self.image_label = tk.Label(image_display_frame, bg="white")
+        self.image_label.pack(expand=True, fill="both")
+
+        button_frame = tk.Frame(self.window) 
+        button_frame.pack(fill="x", side="bottom", pady=10)
+        
+        select_button = tk.Button(button_frame, text="選択したカードを出す", command=self._select_card_from_deck)
+        select_button.pack() 
+
+        self._show_card_image() 
+
+    def _load_card_list_names(self):
+        mapping = {}
+        # MODIFIED: Load CardList.csv from script's directory (root)
+        card_list_path = "CardList.csv"
+
+        try:
+            with open(card_list_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        parts = line.split(",", 2)
+                        if len(parts) >= 2: 
+                            card_id, display_name = parts[0], parts[1]
+                            mapping[card_id] = display_name
+        except FileNotFoundError:
+            messagebox.showerror("エラー", f"{card_list_path}が見つかりません！", parent=self.window)
+        return mapping
     
-    # メインボタンを配置
-    buttons = [
-        ("デッキトップへ戻す", move_to_deck_top),
-        ("デッキボトムへ戻す", move_to_deck_bottom),
-        ("すべて回転解除", unrotate_all),
-        ("ドロー", draw_from_deck),
-        ("シャッフル", shuffle_deck),
-        ("マーカーを追加", add_marker),
-        ("カードID指定生成", select_card_by_id),
-        ("デッキから表向きで出す", lambda: draw_from_deck(y=350)),
-        ("デッキから裏向きで出す", lambda: draw_from_deck(face_up=False,y=350)),
-        ("デッキの中身を見る", view_deck_contents),
-#       ("対戦者ウインドウを開く", open_opponent_window),
-#       ("カード情報ウインドウを開く", open_info_window),
-    ]
-    for i, (text, command) in enumerate(buttons):
-        button = tk.Button(button_frame, text=text, command=command)
-        button.grid(row=i // 5, column=i % 5, padx=5, pady=5)
+    def _show_card_image(self, event=None):
+        selected_indices = self.listbox.curselection()
+        if not selected_indices:
+            if self.app.deck: 
+                first_card_id_in_deck = self.app.deck[0]['id']
+                self._display_image_for_id(first_card_id_in_deck)
+            else: 
+                self.image_label.config(image='', text="カードを選択してください")
+                self.current_photo_image = None
+            return
 
-    # 右下ボタンを配置
-    special_buttons = [
-        ("100連ガチャ", gacha_deck_making),
-        ("デッキをロード", load_deck),
-        ("盤面のセーブ", save_board),
-        ("盤面のロード", load_board),
-        ("再起動", restart_app),
-    ]
-    for i, (text, command) in enumerate(special_buttons):
-        button = tk.Button(bottom_right_frame, text=text, command=command)
-        button.grid(row=i // 2, column=i % 2, padx=5, pady=5)
+        selected_display_name = self.listbox.get(selected_indices[0])
+        
+        selected_card_id = None
+        for c_id, d_name in self.card_mapping.items():
+            if d_name == selected_display_name:
+                if selected_indices[0] < len(self.app.deck) and self.app.deck[selected_indices[0]]['id'] == c_id:
+                     selected_card_id = c_id
+                     break
+        if not selected_card_id and selected_indices[0] < len(self.app.deck): 
+            selected_card_id = self.app.deck[selected_indices[0]]['id']
 
-# ライフポイントの値を表示する（オプション機能として使用可能）
-def show_life_points():
-    print(f"現在のライフポイント: {life_points.get()}")
 
-# デッキ枚数表示を更新する関数
-def update_deck_count_display():
-    if 'deck_count_label' in globals() and deck_count_label.winfo_exists():
-        deck_count_label.config(text=f"デッキ: {len(deck)}枚")
+        if selected_card_id:
+            self._display_image_for_id(selected_card_id)
+        else:
+            self.image_label.config(image='', text="ID不明のカードです")
+            self.current_photo_image = None
+
+    def _display_image_for_id(self, card_id):
+        image_path = os.path.join("card-img", f"{card_id}.png")
+        try:
+            pil_img = Image.open(image_path).resize((390, 555))
+            self.current_photo_image = ImageTk.PhotoImage(pil_img)
+            self.image_label.config(image=self.current_photo_image, text="")
+        except FileNotFoundError:
+            if self.app.noimage_large_photo_image:
+                self.current_photo_image = self.app.noimage_large_photo_image
+                self.image_label.config(image=self.current_photo_image, text="")
+            else:
+                self.image_label.config(image='', text="画像が見つかりません")
+                self.current_photo_image = None
+
+
+    def _select_card_from_deck(self):
+        selected_indices = self.listbox.curselection()
+        if not selected_indices:
+            messagebox.showinfo("エラー", "カードを選択してください！", parent=self.window)
+            return
+        
+        selected_listbox_index = selected_indices[0]
+        
+        if selected_listbox_index < len(self.app.deck):
+            card_to_move = self.app.deck.pop(selected_listbox_index) 
+            
+            card_to_move["x"], card_to_move["y"] = 600, 500 
+            card_to_move["face_up"] = True 
+            card_to_move["revealed"] = True
+            card_to_move["rotated"] = False
+
+            self.app._adjust_card_position(card_to_move)
+            self.app.on_board.append(card_to_move)
+            self.app.selected_card = card_to_move 
+            
+            self.app.draw_cards() 
+            self.destroy_window() 
+        else:
+            messagebox.showerror("エラー", "デッキとリストの同期に問題が発生しました。", parent=self.window)
+
+
+    def destroy_window(self):
+        if self.window:
+            self.window.destroy()
+            self.window = None
+        self.app.deck_contents_window_instance = None
+
+    def lift_window(self):
+        if self.window and self.window.winfo_exists():
+            self.window.lift()
     
-setup_buttons()
+    def is_active(self):
+        return self.window is not None and self.window.winfo_exists()
 
-def show_initial_windows():
-    # カード情報ウィンドウを開く
-    open_info_window()
-    # 対戦者用ウィンドウを開く
-    open_opponent_window()
 
-# メインウィンドウの位置が確定した後に実行
-root.after(100, show_initial_windows)
+class MarkerEditWindow:
+    def __init__(self, app_ref, marker_ref):
+        self.app = app_ref
+        self.root = app_ref.root
+        self.marker = marker_ref 
+        self.window = tk.Toplevel(self.root)
+        self.window.title("テキスト編集")
 
-# 初期描画を実行
-draw_cards()
+        text_widget_width = 30 
+        text_widget_height = 5
+        window_width = text_widget_width * 8 + 40 
+        window_height = text_widget_height * 20 + 80
+        center_tk_window(self.root, self.window, window_width, window_height)
 
-# メインループ開始
-root.mainloop()
+        self.window.protocol("WM_DELETE_WINDOW", self.destroy_window)
+
+        self.text_box = tk.Text(self.window, width=text_widget_width, height=text_widget_height, wrap="word")
+        self.text_box.insert(tk.END, self.marker.get("text", ""))
+        self.text_box.pack(pady=10, padx=10, expand=True, fill="both")
+
+        save_button = tk.Button(self.window, text="保存", command=self._save_text)
+        save_button.pack(pady=5)
+
+        self.text_box.focus_set()
+
+
+    def _save_text(self):
+        new_text = self.text_box.get("1.0", tk.END).strip()
+        self.marker["text"] = new_text 
+        self.app.draw_cards() 
+        self.destroy_window()
+
+    def destroy_window(self):
+        if self.window:
+            self.window.destroy()
+            self.window = None
+        self.app.marker_edit_window_instance = None 
+
+    def lift_window(self):
+        if self.window and self.window.winfo_exists():
+            self.window.lift()
+    
+    def is_active(self):
+        return self.window is not None and self.window.winfo_exists()
+
+
+if __name__ == "__main__":
+    main_root = tk.Tk()
+    app = ShuffleMyriadApp(main_root)
+    main_root.mainloop()
