@@ -198,16 +198,18 @@ class ShuffleMyriadApp:
             btn = tk.Button(button_frame, text=text, command=command)
             btn.grid(row=i // 5, column=i % 5, padx=5, pady=5)
 
-        special_buttons_config = [
-            ("100連ガチャ", self.gacha_deck_making),
-            ("デッキをロード", self.load_deck),
-            ("盤面のセーブ", self.save_board),
-            ("盤面のロード", self.load_board),
-            ("再起動", self.restart_app),
-        ]
-        for i, (text, command) in enumerate(special_buttons_config):
-            btn = tk.Button(bottom_right_frame, text=text, command=command)
-            btn.grid(row=i // 2, column=i % 2, padx=5, pady=5)
+        # Create buttons and place them according to the new layout for special buttons
+        btn_load_deck = tk.Button(bottom_right_frame, text="デッキをロード", command=self.load_deck)
+        btn_load_deck.grid(row=0, column=1, padx=5, pady=5)
+
+        btn_save_board = tk.Button(bottom_right_frame, text="盤面のセーブ", command=self.save_board)
+        btn_save_board.grid(row=1, column=0, padx=5, pady=5)
+
+        btn_load_board = tk.Button(bottom_right_frame, text="盤面のロード", command=self.load_board)
+        btn_load_board.grid(row=1, column=1, padx=5, pady=5)
+
+        btn_restart_app = tk.Button(bottom_right_frame, text="再起動", command=self.restart_app)
+        btn_restart_app.grid(row=2, column=1, padx=5, pady=5)
 
         self.dice_label = tk.Label(self.root, text="", font=("YuGothB.ttc", 24), bg="white")
         # Opponent dice label will be managed by OpponentWindow
@@ -699,69 +701,6 @@ class ShuffleMyriadApp:
         self.on_board.append(card_data)
         self.selected_card = card_data
         self.draw_cards()
-
-
-    def gacha_deck_making(self):
-        card_mapping_ex_val = {} 
-        # MODIFIED: Load CardList.csv from script's directory (root)
-        card_list_path = "CardList.csv" 
-
-        try:
-            with open(card_list_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        parts = line.split(",", 2)
-                        if len(parts) == 3:
-                            card_id, _, card_ex_val = parts
-                            card_mapping_ex_val[card_id] = card_ex_val
-                        else:
-                            print(f"Skipping malformed line in {card_list_path}: {line}")
-
-        except FileNotFoundError:
-            messagebox.showerror("エラー", f"{card_list_path}が見つかりません！")
-            return
-        if not card_mapping_ex_val:
-            messagebox.showerror("エラー", f"{card_list_path}が空または不正な形式です。")
-            return
-
-        card_ids_in_list = list(card_mapping_ex_val.keys())
-        if not card_ids_in_list:
-            messagebox.showerror("エラー", f"{card_list_path}から読み込めるカードがありません。")
-            return
-
-        gacha_selected_cards = []
-        for _ in range(100):
-            chosen_card_id = random.choice(card_ids_in_list)
-            while int(card_mapping_ex_val.get(chosen_card_id, "0")) >= 2: 
-                chosen_card_id = random.choice(card_ids_in_list)
-            gacha_selected_cards.append(chosen_card_id)
-
-        ex_0 = sorted([cid for cid in gacha_selected_cards if card_mapping_ex_val.get(cid) == "0"])
-        ex_1 = sorted([cid for cid in gacha_selected_cards if card_mapping_ex_val.get(cid) == "1"])
-
-        # Gacha deck output still goes to 'deck' folder
-        deck_folder = "deck"
-        if not os.path.exists(deck_folder):
-            try:
-                os.makedirs(deck_folder) 
-            except OSError as e:
-                messagebox.showerror("エラー", f"{deck_folder}フォルダの作成に失敗しました: {e}")
-                return
-        
-        output_filename_base = f"gacha_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
-        output_filename = os.path.join(deck_folder, output_filename_base)
-        
-        try:
-            with open(output_filename, "w", encoding="utf-8") as f:
-                for card_id in ex_0: f.write(f"{card_id}\n")
-                f.write("[EX]\n")
-                for card_id in ex_1: f.write(f"{card_id}\n")
-                f.write("[Resource]\nreverse.png\nplaymat.png\n")
-            messagebox.showinfo("成功", f"{output_filename} に正常にデッキが出力されました。")
-        except Exception as e:
-            messagebox.showerror("エラー", f"ファイルの書き込み中に問題が発生しました: {e}")
-
 
     def _dice_label_forget(self):
         self.dice_label.place_forget()
