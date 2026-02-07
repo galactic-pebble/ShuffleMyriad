@@ -69,9 +69,14 @@ class ShuffleMyriadApp:
         self.on_board = []
         self.markers = []
         self.selected_card = None
+        self.selected_cards = []
         self.is_dragging = False
+        self.is_selecting = False
         self.drag_offset_x = 0
         self.drag_offset_y = 0
+        self.selection_start = None
+        self.selection_end = None
+        self.selection_rect_id = None
 
         self.last_displayed_image = None # For InfoWindow
         self.life_points = tk.IntVar(value=0)
@@ -301,6 +306,8 @@ class ShuffleMyriadApp:
             
             if card_data == self.selected_card:
                 self.canvas.create_rectangle(x, y, x + card_data["width"], y + card_data["height"], outline="red", width=3)
+            elif card_data in self.selected_cards:
+                self.canvas.create_rectangle(x, y, x + card_data["width"], y + card_data["height"], outline="blue", width=2)
 
         self._update_dynamic_buttons_visibility()
 
@@ -350,6 +357,49 @@ class ShuffleMyriadApp:
             self.info_window_instance.update_display()
         if self.opponent_window_instance and self.opponent_window_instance.is_active():
             self.opponent_window_instance.needs_redraw = True
+
+    def _clear_selection_rectangle(self):
+        if self.selection_rect_id:
+            self.canvas.delete(self.selection_rect_id)
+            self.selection_rect_id = None
+
+    def _select_cards_in_rectangle(self, end_x, end_y):
+        self._clear_selection_rectangle()
+        if not self.selection_start:
+            return []
+        start_x, start_y = self.selection_start
+        x1, x2 = sorted([start_x, end_x])
+        y1, y2 = sorted([start_y, end_y])
+        if abs(x2 - x1) < 5 or abs(y2 - y1) < 5:
+            return []
+
+        selected = []
+        for card_data in self.on_board:
+            card_left = card_data["x"]
+            card_top = card_data["y"]
+            card_right = card_left + card_data["width"]
+            card_bottom = card_top + card_data["height"]
+            intersects = not (card_right < x1 or card_left > x2 or card_bottom < y1 or card_top > y2)
+            if intersects:
+                selected.append(card_data)
+        return selected
+
+    def _shuffle_and_gather_cards(self, cards):
+        random.shuffle(cards)
+        if not cards:
+            return
+        start_x, start_y = self.selection_start
+        end_x, end_y = self.selection_end or self.selection_start
+        x1, x2 = sorted([start_x, end_x])
+        y1, y2 = sorted([start_y, end_y])
+        center_x = int((x1 + x2) / 2)
+        center_y = int((y1 + y2) / 2)
+        for card_data in cards:
+            target_x = center_x - card_data["width"] // 2
+            target_y = center_y - card_data["height"] // 2
+            card_data["x"] = max(0, min(target_x, self.canvas.winfo_width() - card_data["width"]))
+            card_data["y"] = max(0, min(target_y, self.canvas.winfo_height() - card_data["height"]))
+        self.selected_card = None
 
     def load_deck(self):
         base_path = os.path.dirname(sys.argv[0]) if getattr(sys, 'frozen', False) else os.getcwd()
@@ -536,12 +586,17 @@ class ShuffleMyriadApp:
     def _on_canvas_click(self, event):
         self.root.focus_set() 
         self._dice_label_forget()
-        
-        self.selected_card = None 
+
+        self._clear_selection_rectangle()
+        self.is_selecting = False
+        self.selection_start = None
+        self.selection_end = None
+        self.selected_card = None
         for marker in reversed(self.markers): 
             if marker["x"] <= event.x < marker["x"] + marker["width"] and \
                marker["y"] <= event.y < marker["y"] + marker["height"]:
                 self.selected_card = marker
+                self.selected_cards = []
                 self.is_dragging = True
                 self.drag_offset_x = event.x - marker["x"]
                 self.drag_offset_y = event.y - marker["y"]
@@ -552,6 +607,7 @@ class ShuffleMyriadApp:
             if card_data["x"] <= event.x < card_data["x"] + card_data["width"] and \
                card_data["y"] <= event.y < card_data["y"] + card_data["height"]:
                 self.selected_card = card_data
+                self.selected_cards = []
                 self.is_dragging = True
                 self.drag_offset_x = event.x - card_data["x"]
                 self.drag_offset_y = event.y - card_data["y"]
@@ -559,9 +615,28 @@ class ShuffleMyriadApp:
                 return 
         
         self.is_dragging = False
-        self.draw_cards() 
+        self.selected_cards = []
+        self.selected_card = None
+        self.is_selecting = True
+        self.selection_start = (event.x, event.y)
+        self.selection_end = (event.x, event.y)
+        self.draw_cards()
+        self.selection_rect_id = self.canvas.create_rectangle(
+            event.x,
+            event.y,
+            event.x,
+            event.y,
+            outline="blue",
+            dash=(4, 2),
+            width=2,
+        )
 
     def _on_canvas_drag(self, event):
+        if self.is_selecting and self.selection_rect_id:
+            start_x, start_y = self.selection_start
+            self.selection_end = (event.x, event.y)
+            self.canvas.coords(self.selection_rect_id, start_x, start_y, event.x, event.y)
+            return
         if self.selected_card and self.is_dragging:
             new_x = event.x - self.drag_offset_x
             new_y = event.y - self.drag_offset_y
@@ -571,6 +646,15 @@ class ShuffleMyriadApp:
             self.draw_cards()
 
     def _on_canvas_release(self, event):
+        if self.is_selecting:
+            self.is_selecting = False
+            self.selection_end = (event.x, event.y)
+            selected_cards = self._select_cards_in_rectangle(event.x, event.y)
+            self.selected_cards = selected_cards
+            if selected_cards:
+                self._shuffle_and_gather_cards(selected_cards)
+            self.draw_cards()
+            return
         self.is_dragging = False
         if self.selected_card: 
             w, h = self.selected_card["width"], self.selected_card["height"]
@@ -591,6 +675,7 @@ class ShuffleMyriadApp:
         if clicked_on_card:
             if self.selected_card != clicked_on_card:
                 self.selected_card = clicked_on_card
+            self.selected_cards = []
             
             cx = self.selected_card["x"] + self.selected_card["width"] / 2
             cy = self.selected_card["y"] + self.selected_card["height"] / 2
