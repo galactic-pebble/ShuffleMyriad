@@ -156,6 +156,11 @@ class ShuffleMyriadApp:
         self.reverse_button = None
         self.bring_to_front_button = None
         self.send_to_back_button = None
+        self.multi_rotate_button = None
+        self.multi_face_down_button = None
+        self.multi_face_up_button = None
+        self.multi_gather_button = None
+        self.multi_shuffle_gather_button = None
 
     def _setup_ui_elements(self):
         button_frame = tk.Frame(self.root)
@@ -249,6 +254,44 @@ class ShuffleMyriadApp:
         if self.reverse_button: self.reverse_button.place_forget()
         if self.bring_to_front_button: self.bring_to_front_button.place_forget()
         if self.send_to_back_button: self.send_to_back_button.place_forget()
+        if self.multi_rotate_button: self.multi_rotate_button.place_forget()
+        if self.multi_face_down_button: self.multi_face_down_button.place_forget()
+        if self.multi_face_up_button: self.multi_face_up_button.place_forget()
+        if self.multi_gather_button: self.multi_gather_button.place_forget()
+        if self.multi_shuffle_gather_button: self.multi_shuffle_gather_button.place_forget()
+
+        if self.selected_cards and not self.is_dragging:
+            if not self.multi_rotate_button:
+                self.multi_rotate_button = tk.Button(self.root, text="選択カードをすべて回転", command=self.rotate_selected_cards)
+                self.multi_face_down_button = tk.Button(self.root, text="選択カードをすべて裏向き", command=self.face_down_selected_cards)
+                self.multi_face_up_button = tk.Button(self.root, text="選択カードをすべて表向き", command=self.face_up_selected_cards)
+                self.multi_gather_button = tk.Button(self.root, text="選択カードをまとめる", command=self.gather_selected_cards)
+                self.multi_shuffle_gather_button = tk.Button(
+                    self.root,
+                    text="選択カードをまとめてシャッフル",
+                    command=lambda: self.gather_selected_cards(shuffle=True)
+                )
+
+            bounds = self._get_cards_bounds(self.selected_cards)
+            if bounds:
+                min_x, min_y, max_x, max_y = bounds
+                button_x = int((min_x + max_x) / 2)
+                button_y = max_y + 5
+                padding = 8
+                buttons = [
+                    self.multi_rotate_button,
+                    self.multi_face_down_button,
+                    self.multi_face_up_button,
+                    self.multi_gather_button,
+                    self.multi_shuffle_gather_button,
+                ]
+                total_width = sum(button.winfo_reqwidth() for button in buttons) + padding * (len(buttons) - 1)
+                start_x = max(0, min(button_x - total_width // 2, 960 - total_width))
+                current_x = start_x
+                for button in buttons:
+                    button.place(x=current_x, y=button_y)
+                    current_x += button.winfo_reqwidth() + padding
+            return
 
         if self.selected_card and self.selected_card not in self.markers and not self.is_dragging:
             if not self.reverse_button: # Create if not exists
@@ -384,22 +427,64 @@ class ShuffleMyriadApp:
                 selected.append(card_data)
         return selected
 
-    def _shuffle_and_gather_cards(self, cards):
-        random.shuffle(cards)
+    def _get_cards_bounds(self, cards):
         if not cards:
+            return None
+        min_x = min(card["x"] for card in cards)
+        min_y = min(card["y"] for card in cards)
+        max_x = max(card["x"] + card["width"] for card in cards)
+        max_y = max(card["y"] + card["height"] for card in cards)
+        return min_x, min_y, max_x, max_y
+
+    def _toggle_card_rotation(self, card_data):
+        cx = card_data["x"] + card_data["width"] / 2
+        cy = card_data["y"] + card_data["height"] / 2
+        card_data["rotated"] = not card_data["rotated"]
+        if card_data["rotated"]:
+            card_data["width"], card_data["height"] = 111, 78
+        else:
+            card_data["width"], card_data["height"] = 78, 111
+        card_data["x"] = int(cx - card_data["width"] / 2)
+        card_data["y"] = int(cy - card_data["height"] / 2)
+
+    def rotate_selected_cards(self):
+        for card_data in self.selected_cards:
+            self._toggle_card_rotation(card_data)
+        self.draw_cards()
+
+    def face_down_selected_cards(self):
+        for card_data in self.selected_cards:
+            card_data["face_up"] = False
+            card_data["revealed"] = False
+        self.draw_cards()
+
+    def face_up_selected_cards(self):
+        for card_data in self.selected_cards:
+            card_data["face_up"] = True
+            card_data["revealed"] = True
+        self.draw_cards()
+
+    def gather_selected_cards(self, shuffle=False):
+        if not self.selected_cards:
             return
-        start_x, start_y = self.selection_start
-        end_x, end_y = self.selection_end or self.selection_start
-        x1, x2 = sorted([start_x, end_x])
-        y1, y2 = sorted([start_y, end_y])
-        center_x = int((x1 + x2) / 2)
-        center_y = int((y1 + y2) / 2)
+        cards = list(self.selected_cards)
+        if shuffle:
+            random.shuffle(cards)
+        bounds = self._get_cards_bounds(cards)
+        if not bounds:
+            return
+        min_x, min_y, max_x, max_y = bounds
+        center_x = int((min_x + max_x) / 2)
+        center_y = int((min_y + max_y) / 2)
         for card_data in cards:
             target_x = center_x - card_data["width"] // 2
             target_y = center_y - card_data["height"] // 2
             card_data["x"] = max(0, min(target_x, self.canvas.winfo_width() - card_data["width"]))
             card_data["y"] = max(0, min(target_y, self.canvas.winfo_height() - card_data["height"]))
-        self.selected_card = None
+        if shuffle:
+            remaining = [card for card in self.on_board if card not in cards]
+            self.on_board = remaining + cards
+        self.draw_cards()
 
     def load_deck(self):
         base_path = os.path.dirname(sys.argv[0]) if getattr(sys, 'frozen', False) else os.getcwd()
@@ -651,8 +736,7 @@ class ShuffleMyriadApp:
             self.selection_end = (event.x, event.y)
             selected_cards = self._select_cards_in_rectangle(event.x, event.y)
             self.selected_cards = selected_cards
-            if selected_cards:
-                self._shuffle_and_gather_cards(selected_cards)
+            self.selected_card = None
             self.draw_cards()
             return
         self.is_dragging = False
@@ -676,19 +760,7 @@ class ShuffleMyriadApp:
             if self.selected_card != clicked_on_card:
                 self.selected_card = clicked_on_card
             self.selected_cards = []
-            
-            cx = self.selected_card["x"] + self.selected_card["width"] / 2
-            cy = self.selected_card["y"] + self.selected_card["height"] / 2
-            
-            self.selected_card["rotated"] = not self.selected_card["rotated"]
-            
-            if self.selected_card["rotated"]:
-                self.selected_card["width"], self.selected_card["height"] = 111, 78
-            else:
-                self.selected_card["width"], self.selected_card["height"] = 78, 111
-
-            self.selected_card["x"] = int(cx - self.selected_card["width"] / 2)
-            self.selected_card["y"] = int(cy - self.selected_card["height"] / 2)
+            self._toggle_card_rotation(self.selected_card)
 
             self.draw_cards()
 
