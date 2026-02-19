@@ -77,6 +77,7 @@ class ShuffleMyriadApp:
         self.selection_start = None
         self.selection_end = None
         self.selection_rect_id = None
+        self.multi_action_anchor = None
 
         self.last_displayed_image = None # For InfoWindow
         self.life_points = tk.IntVar(value=0)
@@ -268,7 +269,7 @@ class ShuffleMyriadApp:
 
         if self.selected_cards and not self.is_dragging:
             if not self.multi_rotate_button:
-                self.multi_rotate_button = tk.Button(self.root, text="選択カードをすべて回転", command=self.rotate_selected_cards)
+                self.multi_rotate_button = tk.Button(self.root, text="選択カードをまとめて回転解除", command=self.unrotate_selected_cards)
                 self.multi_face_down_button = tk.Button(self.root, text="選択カードをすべて裏向き", command=self.face_down_selected_cards)
                 self.multi_face_up_button = tk.Button(self.root, text="選択カードをすべて表向き", command=self.face_up_selected_cards)
                 self.multi_gather_button = tk.Button(self.root, text="選択カードをまとめる", command=self.gather_selected_cards)
@@ -280,9 +281,10 @@ class ShuffleMyriadApp:
 
             bounds = self._get_cards_bounds(self.selected_cards)
             if bounds:
-                min_x, min_y, max_x, max_y = bounds
-                button_x = int((min_x + max_x) / 2)
-                button_y = max_y + 5
+                min_x, _, max_x, max_y = bounds
+                if self.multi_action_anchor is None:
+                    self.multi_action_anchor = (int((min_x + max_x) / 2), max_y + 5)
+                button_x, button_y = self.multi_action_anchor
                 padding = 8
                 buttons = [
                     self.multi_rotate_button,
@@ -495,6 +497,21 @@ class ShuffleMyriadApp:
             self._toggle_card_rotation(card_data)
         self.draw_cards()
 
+    def _unrotate_card(self, card_data):
+        if not card_data.get("rotated"):
+            return
+        cx = card_data["x"] + card_data["width"] / 2
+        cy = card_data["y"] + card_data["height"] / 2
+        card_data["rotated"] = False
+        card_data["width"], card_data["height"] = 78, 111
+        card_data["x"] = int(cx - card_data["width"] / 2)
+        card_data["y"] = int(cy - card_data["height"] / 2)
+
+    def unrotate_selected_cards(self):
+        for card_data in self.selected_cards:
+            self._unrotate_card(card_data)
+        self.draw_cards()
+
     def face_down_selected_cards(self):
         for card_data in self.selected_cards:
             card_data["face_up"] = False
@@ -516,14 +533,23 @@ class ShuffleMyriadApp:
         bounds = self._get_cards_bounds(cards)
         if not bounds:
             return
-        min_x, min_y, max_x, max_y = bounds
-        center_x = int((min_x + max_x) / 2)
-        center_y = int((min_y + max_y) / 2)
+
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        if self.multi_action_anchor:
+            anchor_x, anchor_y = self.multi_action_anchor
+            center_x = anchor_x
+            center_y = anchor_y - 24
+        else:
+            min_x, min_y, max_x, max_y = bounds
+            center_x = int((min_x + max_x) / 2)
+            center_y = int((min_y + max_y) / 2)
+
         for card_data in cards:
             target_x = center_x - card_data["width"] // 2
             target_y = center_y - card_data["height"] // 2
-            card_data["x"] = max(0, min(target_x, self.canvas.winfo_width() - card_data["width"]))
-            card_data["y"] = max(0, min(target_y, self.canvas.winfo_height() - card_data["height"]))
+            card_data["x"] = max(0, min(target_x, canvas_width - card_data["width"]))
+            card_data["y"] = max(0, min(target_y, canvas_height - card_data["height"]))
         if shuffle:
             remaining = [card for card in self.on_board if card not in cards]
             self.on_board = remaining + cards
@@ -741,6 +767,7 @@ class ShuffleMyriadApp:
                marker["y"] <= event.y < marker["y"] + marker["height"]:
                 self.selected_card = marker
                 self.selected_cards = []
+                self.multi_action_anchor = None
                 self.is_dragging = True
                 self.drag_offset_x = event.x - marker["x"]
                 self.drag_offset_y = event.y - marker["y"]
@@ -752,6 +779,7 @@ class ShuffleMyriadApp:
                card_data["y"] <= event.y < card_data["y"] + card_data["height"]:
                 self.selected_card = card_data
                 self.selected_cards = []
+                self.multi_action_anchor = None
                 self.is_dragging = True
                 self.drag_offset_x = event.x - card_data["x"]
                 self.drag_offset_y = event.y - card_data["y"]
@@ -760,6 +788,7 @@ class ShuffleMyriadApp:
         
         self.is_dragging = False
         self.selected_cards = []
+        self.multi_action_anchor = None
         self.selected_card = None
         self.is_selecting = True
         self.selection_start = (event.x, event.y)
@@ -795,6 +824,7 @@ class ShuffleMyriadApp:
             self.selection_end = (event.x, event.y)
             selected_cards = self._select_cards_in_rectangle(event.x, event.y)
             self.selected_cards = selected_cards
+            self.multi_action_anchor = None
             self.selected_card = None
             self.draw_cards()
             return
@@ -819,6 +849,7 @@ class ShuffleMyriadApp:
             if self.selected_card != clicked_on_card:
                 self.selected_card = clicked_on_card
             self.selected_cards = []
+            self.multi_action_anchor = None
             self._toggle_card_rotation(self.selected_card)
 
             self.draw_cards()
@@ -893,13 +924,7 @@ class ShuffleMyriadApp:
 
     def unrotate_all(self):
         for card_data in self.on_board:
-            if card_data.get("rotated"):
-                cx = card_data["x"] + card_data["width"] / 2
-                cy = card_data["y"] + card_data["height"] / 2
-                card_data["rotated"] = False
-                card_data["width"], card_data["height"] = 78, 111 
-                card_data["x"] = int(cx - card_data["width"] / 2)
-                card_data["y"] = int(cy - card_data["height"] / 2)
+            self._unrotate_card(card_data)
         self.draw_cards()
 
     def draw_from_deck(self, face_up=True, x=600, y=500):
