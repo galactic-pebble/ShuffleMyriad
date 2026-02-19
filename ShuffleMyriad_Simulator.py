@@ -208,6 +208,12 @@ class ShuffleMyriadApp:
             btn = tk.Button(button_frame, text=text, command=command)
             btn.grid(row=i // 5, column=i % 5, padx=5, pady=5)
 
+        chip_buttons_frame = tk.Frame(button_frame)
+        chip_buttons_frame.grid(row=2, column=0, columnspan=5, pady=(0, 4))
+        tk.Label(chip_buttons_frame, text="チップ:").pack(side="left", padx=(0, 6))
+        for label, color_name in [("赤", "red"), ("青", "blue"), ("緑", "green"), ("黄", "yellow"), ("白", "white")]:
+            tk.Button(chip_buttons_frame, text=label, width=3, command=lambda c=color_name: self.add_chip(c)).pack(side="left", padx=2)
+
         # Create buttons and place them according to the new layout for special buttons
         btn_load_deck = tk.Button(bottom_right_frame, text="デッキをロード", command=self.load_deck)
         btn_load_deck.grid(row=0, column=1, padx=5, pady=5)
@@ -364,33 +370,70 @@ class ShuffleMyriadApp:
                 font = ImageFont.load_default()
 
 
-            for marker in self.markers:
-                text_width, text_height = 0, 0
-                if marker["text"]:
-                    try:
-                        bbox = draw_pil.textbbox((0,0), marker["text"], font=font)
-                        text_width = bbox[2] - bbox[0]
-                        text_height = bbox[3] - bbox[1]
-                    except Exception as e: 
-                         print(f"Could not get textbbox for marker text '{marker['text']}': {e}")
+            chip_colors = {
+                "red": (220, 53, 69, 220),
+                "blue": (13, 110, 253, 220),
+                "yellow": (255, 193, 7, 220),
+                "green": (25, 135, 84, 220),
+                "white": (245, 245, 245, 230),
+            }
 
-                marker["text_width"] = text_width
-                marker["text_height"] = text_height
-                marker["width"] = max(marker["text_width"] + 20, 120)
-                marker["height"] = max(marker["text_height"] + 10, 50)
-                
-                mx, my, mw, mh = marker["x"], marker["y"], marker["width"], marker["height"]
-                
-                translucent_color_pil = (128, 128, 128, 128) # RGBA
-                draw_pil.rectangle([mx, my, mx + mw, my + mh], fill=translucent_color_pil)
+            normal_markers = [m for m in self.markers if m.get("type", "marker") != "chip"]
+            chip_markers = [m for m in self.markers if m.get("type") == "chip"]
 
-                if marker["text"]:
-                    draw_text_with_outline(draw_pil, (mx, my), marker["text"], font,
-                                           "black", "white", 2, 
-                                           mw, mh, text_width, text_height)
-                
-                if marker == self.selected_card: 
-                    self.canvas.create_rectangle(mx, my, mx + mw, my + mh, outline="red", width=3)
+            for marker in normal_markers + chip_markers:
+                mx, my = marker["x"], marker["y"]
+                marker_type = marker.get("type", "marker")
+
+                if marker_type == "chip":
+                    marker["width"] = marker.get("width", 18)
+                    marker["height"] = marker.get("height", 18)
+                    mw, mh = marker["width"], marker["height"]
+                    chip_color_name = marker.get("chip_color", "white")
+                    chip_fill = chip_colors.get(chip_color_name, chip_colors["white"])
+                    outline_color = (60, 60, 60, 255)
+                    draw_pil.ellipse([mx, my, mx + mw, my + mh], fill=chip_fill, outline=outline_color, width=2)
+
+                    chip_text = marker.get("text", "")
+                    if chip_text:
+                        try:
+                            bbox = draw_pil.textbbox((0, 0), chip_text, font=font)
+                            text_width = bbox[2] - bbox[0]
+                            text_height = bbox[3] - bbox[1]
+                        except Exception:
+                            text_width, text_height = 0, 0
+                        marker["text_width"] = text_width
+                        marker["text_height"] = text_height
+                        text_color = "black" if chip_color_name in ["yellow", "white"] else "white"
+                        draw_text_with_outline(draw_pil, (mx, my), chip_text, font,
+                                               text_color, "black", 1,
+                                               mw, mh, text_width, text_height)
+                else:
+                    text_width, text_height = 0, 0
+                    if marker["text"]:
+                        try:
+                            bbox = draw_pil.textbbox((0,0), marker["text"], font=font)
+                            text_width = bbox[2] - bbox[0]
+                            text_height = bbox[3] - bbox[1]
+                        except Exception as e:
+                            print(f"Could not get textbbox for marker text '{marker['text']}': {e}")
+
+                    marker["text_width"] = text_width
+                    marker["text_height"] = text_height
+                    marker["width"] = max(marker["text_width"] + 20, 120)
+                    marker["height"] = max(marker["text_height"] + 10, 50)
+                    mw, mh = marker["width"], marker["height"]
+
+                    translucent_color_pil = (128, 128, 128, 128) # RGBA
+                    draw_pil.rectangle([mx, my, mx + mw, my + mh], fill=translucent_color_pil)
+
+                    if marker["text"]:
+                        draw_text_with_outline(draw_pil, (mx, my), marker["text"], font,
+                                               "black", "white", 2,
+                                               mw, mh, text_width, text_height)
+
+                if marker == self.selected_card:
+                    self.canvas.create_rectangle(mx, my, mx + marker["width"], my + marker["height"], outline="red", width=3)
 
             self.marker_layer_tk = ImageTk.PhotoImage(marker_layer_pil)
             self.canvas.create_image(0,0, image=self.marker_layer_tk, anchor="nw")
@@ -667,6 +710,22 @@ class ShuffleMyriadApp:
         self.selected_card = marker 
         self.draw_cards()
 
+    def add_chip(self, color_name):
+        chip_size = 18
+        marker = {
+            "type": "chip",
+            "x": self.canvas.winfo_width() // 2 - chip_size // 2,
+            "y": int(self.canvas.winfo_height() * 0.9),
+            "width": chip_size,
+            "height": chip_size,
+            "text": "",
+            "chip_color": color_name,
+            "text_width": 0,
+            "text_height": 0,
+        }
+        self.markers.append(marker)
+        self.selected_card = marker
+        self.draw_cards()
 
     def _on_canvas_click(self, event):
         self.root.focus_set() 
@@ -940,9 +999,11 @@ class ShuffleMyriadApp:
                 file.write("[Markers]\n")
                 for marker in self.markers:
                     text_escaped = marker['text'].replace('\n', '\\n')
+                    marker_type = marker.get('type', 'marker')
+                    chip_color = marker.get('chip_color', '')
                     file.write(
-                        f"{text_escaped},{marker['x']},{marker['y']},"
-                        f"{marker['width']},{marker['height']}\n"
+                        f"{marker_type},{text_escaped},{marker['x']},{marker['y']},"
+                        f"{marker['width']},{marker['height']},{chip_color}\n"
                     )
             messagebox.showinfo("成功", f"盤面を保存しました！\nファイル名: {output_filename}")
         except Exception as e:
@@ -997,15 +1058,24 @@ class ShuffleMyriadApp:
                             bool(int(face_up)), bool(int(revealed))
                         ))
                 elif section == "markers":
-                    parts = line_content.split(",", 4) 
-                    if len(parts) == 5:
+                    parts = line_content.split(",")
+                    if len(parts) >= 7:
+                        marker_type, text, x, y, width, height, chip_color = parts[:7]
+                    elif len(parts) == 5:
+                        marker_type = "marker"
                         text, x, y, width, height = parts
-                        self.markers.append({
-                            "type": "marker", "text": text.replace('\\n', '\n'),
-                            "x": int(x), "y": int(y),
-                            "width": int(width), "height": int(height),
-                            "selected": False, "text_width":0, "text_height":0
-                        })
+                        chip_color = ""
+                    else:
+                        continue
+
+                    self.markers.append({
+                        "type": marker_type or "marker",
+                        "text": text.replace('\\n', '\n'),
+                        "x": int(x), "y": int(y),
+                        "width": int(width), "height": int(height),
+                        "chip_color": chip_color,
+                        "selected": False, "text_width":0, "text_height":0
+                    })
             
             if len(resource_lines_from_file) >= 1:
                  new_rev_path = os.path.join("resource", resource_lines_from_file[0])
@@ -1294,18 +1364,39 @@ class OpponentWindow:
             except IOError:
                 font_opp = ImageFont.load_default()
 
-            for marker in self.app.markers:
+            chip_colors = {
+                "red": (220, 53, 69, 220),
+                "blue": (13, 110, 253, 220),
+                "yellow": (255, 193, 7, 220),
+                "green": (25, 135, 84, 220),
+                "white": (245, 245, 245, 230),
+            }
+
+            normal_markers = [m for m in self.app.markers if m.get("type", "marker") != "chip"]
+            chip_markers = [m for m in self.app.markers if m.get("type") == "chip"]
+
+            for marker in normal_markers + chip_markers:
                 ox, oy, ow, oh = marker["x"], marker["y"], marker["width"], marker["height"]
                 opp_marker_x = 960 - (ox + ow)
                 opp_marker_y = 720 - (oy + oh)
 
-                translucent_color_pil = (128, 128, 128, 128)
-                draw_pil_opp.rectangle([opp_marker_x, opp_marker_y, opp_marker_x + ow, opp_marker_y + oh], fill=translucent_color_pil)
+                if marker.get("type") == "chip":
+                    chip_color_name = marker.get("chip_color", "white")
+                    chip_fill = chip_colors.get(chip_color_name, chip_colors["white"])
+                    draw_pil_opp.ellipse([opp_marker_x, opp_marker_y, opp_marker_x + ow, opp_marker_y + oh], fill=chip_fill, outline=(60, 60, 60, 255), width=2)
+                    if marker.get("text"):
+                        text_color = "black" if chip_color_name in ["yellow", "white"] else "white"
+                        draw_text_with_outline(draw_pil_opp, (opp_marker_x, opp_marker_y), marker["text"], font_opp,
+                                               text_color, "black", 1,
+                                               ow, oh, marker.get("text_width", 0), marker.get("text_height", 0))
+                else:
+                    translucent_color_pil = (128, 128, 128, 128)
+                    draw_pil_opp.rectangle([opp_marker_x, opp_marker_y, opp_marker_x + ow, opp_marker_y + oh], fill=translucent_color_pil)
 
-                if marker["text"]:
-                    draw_text_with_outline(draw_pil_opp, (opp_marker_x, opp_marker_y), marker["text"], font_opp,
-                                           "black", "white", 2,
-                                           ow, oh, marker["text_width"], marker["text_height"])
+                    if marker["text"]:
+                        draw_text_with_outline(draw_pil_opp, (opp_marker_x, opp_marker_y), marker["text"], font_opp,
+                                               "black", "white", 2,
+                                               ow, oh, marker["text_width"], marker["text_height"])
             
             self.marker_layer_opponent_tk = ImageTk.PhotoImage(marker_layer_pil_opp)
             self.canvas.create_image(0,0, image=self.marker_layer_opponent_tk, anchor="nw")
@@ -1499,6 +1590,9 @@ class DeckContentsWindow:
     
     def is_active(self):
         return self.window is not None and self.window.winfo_exists()
+
+
+
 
 
 class MarkerEditWindow:
