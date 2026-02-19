@@ -378,7 +378,10 @@ class ShuffleMyriadApp:
                 "white": (245, 245, 245, 230),
             }
 
-            for marker in self.markers:
+            normal_markers = [m for m in self.markers if m.get("type", "marker") != "chip"]
+            chip_markers = [m for m in self.markers if m.get("type") == "chip"]
+
+            for marker in normal_markers + chip_markers:
                 mx, my = marker["x"], marker["y"]
                 marker_type = marker.get("type", "marker")
 
@@ -1369,7 +1372,10 @@ class OpponentWindow:
                 "white": (245, 245, 245, 230),
             }
 
-            for marker in self.app.markers:
+            normal_markers = [m for m in self.app.markers if m.get("type", "marker") != "chip"]
+            chip_markers = [m for m in self.app.markers if m.get("type") == "chip"]
+
+            for marker in normal_markers + chip_markers:
                 ox, oy, ow, oh = marker["x"], marker["y"], marker["width"], marker["height"]
                 opp_marker_x = 960 - (ox + ow)
                 opp_marker_y = 720 - (oy + oh)
