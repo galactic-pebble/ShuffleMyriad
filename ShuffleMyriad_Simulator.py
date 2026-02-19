@@ -539,7 +539,6 @@ class ShuffleMyriadApp:
         if self.multi_action_anchor:
             anchor_x, anchor_y = self.multi_action_anchor
             center_x = anchor_x
-            center_y = anchor_y - 24
         else:
             min_x, min_y, max_x, max_y = bounds
             center_x = int((min_x + max_x) / 2)
@@ -547,7 +546,10 @@ class ShuffleMyriadApp:
 
         for card_data in cards:
             target_x = center_x - card_data["width"] // 2
-            target_y = center_y - card_data["height"] // 2
+            if self.multi_action_anchor:
+                target_y = anchor_y - 5 - card_data["height"]
+            else:
+                target_y = center_y - card_data["height"] // 2
             card_data["x"] = max(0, min(target_x, canvas_width - card_data["width"]))
             card_data["y"] = max(0, min(target_y, canvas_height - card_data["height"]))
         if shuffle:
